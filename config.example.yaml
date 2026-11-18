@@ -1,0 +1,34 @@
+# Copier en config.yaml
+data_dir: data
+poll_seconds: 120          # "every couple of minutes"
+
+streamers:
+  - {platform: twitch, channel: mehdoche}
+  - {platform: kick, channel: xqc}
+  - {platform: youtube, channel: "@SomeChannel"}
+
+record:
+  quality: "720p60,720p,480p30,best"
+  segment_seconds: 10      # petits segments = clip possible a tout moment
+  buffer_minutes: 15       # fenetre glissante gardee sur disque
+
+detect:
+  window_seconds: 10       # fenetre d'agregation des signaux
+  baseline_minutes: 10     # reference "normale" du stream
+  threshold: 2.0           # score fusionne (moyenne ponderee des ecarts robustes)
+  cooldown_seconds: 90
+  warmup_seconds: 120
+  weights: {chat_rate: 1.0, unique_chatters: 1.2, laugh_emotes: 1.5, hype_emotes: 0.8, audio: 1.0}
+
+clip:
+  pre_roll: 40             # "35 to 45 seconds earlier"
+  post_roll: 20
+  vertical: true           # 9:16 fond flou
+  captions: true           # sous-titres faster-whisper incrustes
+  whisper_model: small
+  language: fr             # langue des sous-titres (vide = auto)
+
+publish:
+  provider: postforme
+  social_accounts: []      # ids Post for Me (spc_...)
+  caption_template: "{streamer} 😂 #gta #clips #{platform}"
