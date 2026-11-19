@@ -1,40 +1,42 @@
-# Clipautomatisation
+# ClipAuto
 
-Clipping automatique de lives Twitch / Kick / YouTube, d'après le workflow
-« GTA clipping system » : surveillance des lives → enregistrement Streamlink →
-détection des moments forts (chat + rires + audio) → clip 9:16 sous-titré →
-validation Discord → publication multi-réseaux via Post for Me.
+Web app de clipping automatique de lives **Twitch / Kick / YouTube** (style Opus Clip) :
+surveillance des lives → enregistrement Streamlink → détection des moments forts
+(chat, rires, hype, mots-clés, volume) → clip 9:16 avec sous-titres karaoké
+synchronisés au mot → éditeur intégré → validation (web ou Discord) → publication
+multi-réseaux via Post for Me.
 
-```
-monitor.py   API Helix Twitch, kick.com/api/v2, Streamlink (YouTube / repli)   toutes les 2 min
-recorder.py  streamlink | ffmpeg → segments de 10 s, fenêtre glissante 15 min
-chat.py      chat EN DIRECT : IRC Twitch anonyme, WebSocket Kick
-audio.py     volume dB par 0,5 s de chaque segment
-detector.py  fusion de 5 signaux normalisés par stream (médiane/MAD) → déclenchement
-clipper.py   [pic − 40 s, pic + 20 s] → 1080x1920 fond flou + sous-titres faster-whisper
-review.py    bot Discord : notif « live », clip + boutons Approuver / Rejeter
-publisher.py Post for Me : upload signé → post sur tous les comptes connectés
-app.py       orchestration, store.py SQLite des clips
-```
+## Interface (http://IP:8000)
+- **Clips** : bibliothèque avec score viral, aperçu au survol, approuver / rejeter / télécharger.
+- **Éditeur** (façon CapCut) :
+  - **Découpe** : forme d'onde audio, poignées début/fin, « caler sur les phrases »
+  - **Sous-titres** : correction mot par mot, re-transcription, décalage de synchro
+  - **Style** : 5 presets (karaoke, hormozi, mrbeast, minimal, gaming), 8 polices, couleurs, taille, position, mots par ligne, animation pop, titre d'accroche
+  - **Cadrage** : fond flou + zoom, plein écran (bande à placer), facecam + jeu (2 cadres à placer), bandes noires
+  - vitesse 0.9×–1.25×, aperçu identique au rendu final, rendu MP4 1080×1920
+- **Streamers** : ajout par nom ou lien, statut live, courbe de détection en temps réel, réglages propres à chaque streamer.
+- **Importer** : lien de VOD (yt-dlp) ou fichier → N meilleurs moments.
+- **Réglages** : sensibilité, poids de chaque signal, listes de mots (rires, hype, mots-clés perso), durées min/max, avant/après le pic, langue, précision de la transcription, style par défaut, publication auto.
 
 ## Lancer
-
 ```bash
-cp .env.example .env            # clés Twitch, Discord, Post for Me
-cp config.example.yaml config.yaml   # streamers à suivre, seuils
-pip install -r requirements.txt   # + ffmpeg installé
-python -m clipauto live           # qui est en live maintenant ?
-python -m clipauto run            # boucle complète
-python -m clipauto pending | approve <id> | reject <id>   # sans Discord
+cp .env.example .env     # TWITCH_*, DISCORD_* (optionnel), POST_FOR_ME_API_KEY, APP_PASSWORD
+docker compose up -d --build
+# ou sans Docker : pip install -r requirements.txt && python -m clipauto web
 ```
 
-Sur VPS : `docker compose up -d --build`.
-
-## Réglages clés (`config.yaml > detect`)
-- `threshold` : plus bas = plus de clips. 2.0 par défaut ; 1.2–1.5 pour les petits streams.
-- `weights` : importance de chaque signal (rires du chat pèsent le plus).
-- Au moins 2 signaux doivent monter ensemble (un spammeur seul ne déclenche rien).
-
-## Briques open source utilisées / étudiées
-Voir `docs/ANALYSE-OPEN-SOURCE.md` (Streamlink, faster-whisper, idées de Clips Kitty,
-HighlightMiner, ClippyMe, OpenShorts).
+## Architecture
+```
+clipauto/web.py       API FastAPI + fichiers statiques web/
+clipauto/engine.py    sessions live, création de clips, imports, rendus, publication
+clipauto/monitor.py   détection des lives (API Helix, kick.com, Streamlink)
+clipauto/recorder.py  Streamlink → segments de 10 s (fenêtre glissante)
+clipauto/chat.py      chat en direct (IRC Twitch, WebSocket Kick)
+clipauto/detector.py  fusion des signaux normalisés par stream
+clipauto/clipper.py   extraction, transcription faster-whisper (mots), découpe intelligente, rendu ffmpeg
+clipauto/captions.py  sous-titres ASS karaoké (même logique que l'aperçu web)
+clipauto/db.py        SQLite : réglages, streamers, clips, jobs
+web/                  interface (HTML/CSS/JS sans build)
+fonts/                polices OFL (Montserrat, Poppins, Anton, Bangers, Bebas Neue)
+```
+Analyse des projets open source étudiés : `docs/ANALYSE-OPEN-SOURCE.md`.

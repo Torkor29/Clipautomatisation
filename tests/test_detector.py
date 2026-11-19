@@ -35,3 +35,15 @@ def test_single_spammer_does_not_trigger():
     for j in range(40):
         d.add_message(t + j / 5, "bot", "hello")
     assert d.step(t + 10) is None
+
+
+def test_single_laugh_on_silent_history_is_not_huge():
+    d = Detector(window=10, warmup=0, cooldown=0)
+    t = 0.0
+    for i in range(30):
+        d.add_message(t + 1, f"u{i % 3}", "salut")
+        t += 10
+        d.step(t)
+    d.add_message(t + 1, "x", "KEKW")
+    d.step(t + 10)
+    assert abs(d.timeline[-1][2]["laugh_emotes"]) <= 10

@@ -81,16 +81,22 @@ async def _streamlink_live(url: str) -> dict | None:
 class LiveMonitor:
     """Interroge chaque plateforme toutes les `poll_seconds` et émet on_live / on_offline."""
 
-    def __init__(self, streamers: list[Streamer], poll_seconds: int, on_live, on_offline):
-        self.streamers, self.poll = streamers, poll_seconds
+    def __init__(self, streamers, poll_seconds, on_live, on_offline):
+        # streamers : liste OU fonction qui renvoie la liste (rechargée à chaque tour)
+        self._streamers, self.poll = streamers, poll_seconds
         self.on_live, self.on_offline = on_live, on_offline
         self.state: dict[str, bool] = {}
         cid, sec = os.environ.get("TWITCH_CLIENT_ID"), os.environ.get("TWITCH_CLIENT_SECRET")
         self.twitch = TwitchAPI(cid, sec) if cid and sec else None
 
+    @property
+    def streamers(self) -> list[Streamer]:
+        return self._streamers() if callable(self._streamers) else self._streamers
+
     async def check_once(self, s: aiohttp.ClientSession) -> dict[str, dict | None]:
         res: dict[str, dict | None] = {}
-        tw = [x for x in self.streamers if x.platform == "twitch"]
+        streamers = self.streamers
+        tw = [x for x in streamers if x.platform == "twitch"]
         if tw:
             if self.twitch:
                 live = await self.twitch.live(s, [x.channel.lower() for x in tw])
@@ -99,7 +105,7 @@ class LiveMonitor:
             else:
                 for x in tw:
                     res[x.key] = await _streamlink_live(x.url)
-        for x in self.streamers:
+        for x in streamers:
             if x.platform == "kick":
                 res[x.key] = await kick_live(s, x.channel)
             elif x.platform == "youtube":
@@ -114,6 +120,10 @@ class LiveMonitor:
                 except Exception:  # réseau, quota… on retente au prochain tour
                     log.exception("échec du polling")
                     res = {}
+                keys = {x.key for x in self.streamers}
+                for k in [k for k in self.state if k not in keys and self.state[k]]:
+                    self.state[k] = False  # streamer retiré/désactivé pendant son live
+                    await self.on_offline(k)
                 for x in self.streamers:
                     if x.key not in res:
                         continue
@@ -121,6 +131,7 @@ class LiveMonitor:
                     if info and not was:
                         await self.on_live(x, info)
                     elif not info and was:
-                        await self.on_offline(x)
+                        await self.on_offline(x.key)
                     self.state[x.key] = bool(info)
-                await asyncio.sleep(self.poll)
+                poll = self.poll() if callable(self.poll) else self.poll
+                await asyncio.sleep(poll)
