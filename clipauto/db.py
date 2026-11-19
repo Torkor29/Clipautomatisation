@@ -31,6 +31,8 @@ DEFAULT_SETTINGS = {
                "facecam": {"x": 0.0, "y": 0.0, "w": 0.3, "h": 0.3},
                "gameplay": {"x": 0.2, "y": 0.0, "w": 0.6, "h": 1.0}},
     "hook": {"enabled": True, "seconds": 3.5, "size": 72, "color": "#FFFFFF", "bg": "#000000"},
+    "compilation": {"transition": "fade", "transition_duration": 0.4, "max_each": 20, "clips": 6,
+                    "hours": 12},
     "publish": {"auto_publish": False, "social_accounts": [],
                 "caption_template": "{title} 😂 #{streamer} #gta #clips"},
 }

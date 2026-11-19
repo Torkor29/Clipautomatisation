@@ -150,48 +150,164 @@ def _crop(rect: dict, iw: int, ih: int, aspect: float) -> str:
     return f"crop={int(nw) // 2 * 2}:{int(nh) // 2 * 2}:{int(nx)}:{int(ny)}"
 
 
-def layout_filter(layout: dict, iw: int, ih: int) -> str:
+TRANSITIONS = {  # nom affiché → filtre xfade (« cut » = coupe sèche)
+    "cut": "Coupe sèche", "fade": "Fondu enchaîné", "fadeblack": "Fondu au noir", "fadewhite": "Flash blanc",
+    "dissolve": "Dissolution", "slideleft": "Glisser ←", "slideright": "Glisser →", "slideup": "Glisser ↑",
+    "slidedown": "Glisser ↓", "wipeleft": "Volet ←", "wiperight": "Volet →", "smoothleft": "Balayage doux",
+    "circleopen": "Cercle", "radial": "Radial", "zoomin": "Zoom", "pixelize": "Pixels", "hblur": "Flou",
+    "squeezev": "Écrasement",
+}
+EFFECTS = {"none": "Aucun", "zoomin": "Zoom progressif", "punch": "Zoom fixe (punch-in)",
+           "zoomout": "Dézoom", "bw": "Noir & blanc", "slowmo": "Ralenti ×0.75", "fast": "Accéléré ×1.25"}
+
+
+def segments_of(edit: dict) -> list[dict]:
+    segs = edit.get("segments") or [{"s": edit["trim"][0], "e": edit["trim"][1]}]
+    return [x for x in segs if x["e"] - x["s"] > 0.2]
+
+
+def seg_speed(seg: dict, global_speed: float = 1.0) -> float:
+    fx = seg.get("effect", "none")
+    return global_speed * (0.75 if fx == "slowmo" else 1.25 if fx == "fast" else 1.0)
+
+
+def timeline(edit: dict) -> list[dict]:
+    """Position de chaque segment dans la vidéo finale (en tenant compte des transitions et vitesses)."""
+    out, t, sp = [], 0.0, float(edit.get("speed", 1.0) or 1.0)
+    for i, seg in enumerate(segments_of(edit)):
+        d = (seg["e"] - seg["s"]) / seg_speed(seg, sp)
+        tr = seg.get("transition") or {}
+        td = 0.0 if i == 0 or tr.get("type", "cut") == "cut" else min(float(tr.get("duration", 0.4)), d / 2)
+        start = t - td
+        out.append({**seg, "out_start": start, "out_dur": d, "td": td})
+        t = start + d
+    return out
+
+
+def output_duration(edit: dict) -> float:
+    tl = timeline(edit)
+    return tl[-1]["out_start"] + tl[-1]["out_dur"] if tl else 0.0
+
+
+def remap_words(words: list[dict], edit: dict) -> list[dict]:
+    """Mots de la source → temps de la vidéo finale (pour les sous-titres)."""
+    out = []
+    tl = timeline(edit)
+    sp = float(edit.get("speed", 1.0) or 1.0)
+    for k, seg in enumerate(tl):
+        f = seg_speed(seg, sp)
+        lo = seg["s"] + (seg["td"] * f if k else 0)  # pendant la transition : sous-titres du segment précédent
+        for w in words:
+            if w["s"] >= lo - 0.01 and w["s"] < seg["e"]:
+                out.append({"w": w["w"], "s": seg["out_start"] + (w["s"] - seg["s"]) / f,
+                            "e": seg["out_start"] + (min(w["e"], seg["e"]) - seg["s"]) / f})
+    return out
+
+
+def layout_filter(layout: dict, iw: int, ih: int, inp: str = "0:v", outl: str = "v") -> str:
     mode = layout.get("mode", "blur")
     if mode == "fill":
         fx = float(layout.get("focus", {}).get("x", 0.5))
         nw = ih * 9 / 16
         x = min(max(fx * iw - nw / 2, 0), iw - nw)
-        return f"[0:v]crop={int(nw) // 2 * 2}:{ih}:{int(x)}:0,scale={OUT_W}:{OUT_H},setsar=1[v]"
+        return f"[{inp}]crop={int(nw) // 2 * 2}:{ih}:{int(x)}:0,scale={OUT_W}:{OUT_H},setsar=1[{outl}]"
     if mode == "split":
         r = float(layout.get("split_ratio", 0.42))
         th = int(OUT_H * r) // 2 * 2
         bh = OUT_H - th
         top = _crop(layout.get("facecam", {}), iw, ih, OUT_W / th)
         bot = _crop(layout.get("gameplay", {}), iw, ih, OUT_W / bh)
-        return (f"[0:v]split[a][b];[a]{top},scale={OUT_W}:{th}[t];[b]{bot},scale={OUT_W}:{bh}[g];"
-                f"[t][g]vstack,setsar=1[v]")
+        return (f"[{inp}]split[{outl}a][{outl}b];[{outl}a]{top},scale={OUT_W}:{th}[{outl}t];[{outl}b]{bot},scale={OUT_W}:{bh}[{outl}g];"
+                f"[{outl}t][{outl}g]vstack,setsar=1[{outl}]")
     if mode == "fit":
-        return (f"[0:v]scale={OUT_W}:-2,pad={OUT_W}:{OUT_H}:(ow-iw)/2:(oh-ih)/2:black,setsar=1[v]")
+        return (f"[{inp}]scale={OUT_W}:-2,pad={OUT_W}:{OUT_H}:(ow-iw)/2:(oh-ih)/2:black,setsar=1[{outl}]")
     # blur : vidéo entière au centre + fond flouté
     zoom = float(layout.get("zoom", 1.0))
-    return (f"[0:v]split[a][b];[a]scale={OUT_W}:{OUT_H}:force_original_aspect_ratio=increase,"
-            f"crop={OUT_W}:{OUT_H},boxblur=30:3,eq=brightness=-0.08[bg];"
-            f"[b]scale={int(OUT_W * zoom) // 2 * 2}:-2[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1[v]")
+    return (f"[{inp}]split[{outl}a][{outl}b];[{outl}a]scale={OUT_W}:{OUT_H}:force_original_aspect_ratio=increase,"
+            f"crop={OUT_W}:{OUT_H},boxblur=30:3,eq=brightness=-0.08[{outl}bg];"
+            f"[{outl}b]scale={int(OUT_W * zoom) // 2 * 2}:-2[{outl}fg];[{outl}bg][{outl}fg]overlay=(W-w)/2:(H-h)/2,setsar=1[{outl}]")
+
+
+def effect_filter(fx: str, d: float) -> str:
+    if fx == "zoomin":
+        return (f",zoompan=z='min(1+0.15*on/{max(int(d * 30), 1)},1.15)':d=1:x='iw/2-iw/zoom/2':"
+                f"y='ih/2-ih/zoom/2':s={OUT_W}x{OUT_H}:fps=30")
+    if fx == "zoomout":
+        return (f",zoompan=z='max(1.15-0.15*on/{max(int(d * 30), 1)},1)':d=1:x='iw/2-iw/zoom/2':"
+                f"y='ih/2-ih/zoom/2':s={OUT_W}x{OUT_H}:fps=30")
+    if fx == "punch":
+        return f",scale={int(OUT_W * 1.18) // 2 * 2}:-2,crop={OUT_W}:{OUT_H}"
+    if fx == "bw":
+        return ",hue=s=0"
+    return ""
+
+
+async def has_audio(path: Path) -> bool:
+    out = await run("ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=index",
+                    "-of", "csv=p=0", str(path))
+    return bool(out.strip())
 
 
 async def render(source: Path, words: list[dict], edit: dict, out: Path) -> Path:
-    t0, t1 = edit["trim"]
+    """Rendu 9:16 : segments (découpes multiples) + effets + transitions xfade + sous-titres karaoké."""
     iw, ih = await probe_size(source)
+    audio = await has_audio(source)
+    tl = timeline(edit)
+    sp = float(edit.get("speed", 1.0) or 1.0)
     out.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory() as td:
         ass = Path(td) / "subs.ass"
-        kept = [w for w in words if w["e"] > t0 and w["s"] < t1]
-        ass.write_text(build_ass(kept if edit.get("captions", True) else [], edit["style"], offset=t0,
-                                 duration=t1 - t0, hook=edit.get("hook"), hook_text=edit.get("title", "")),
+        total = output_duration(edit)
+        ass.write_text(build_ass(remap_words(words, edit) if edit.get("captions", True) else [], edit["style"],
+                                 offset=0, duration=total, hook=edit.get("hook"), hook_text=edit.get("title", "")),
                        encoding="utf-8")
-        fc = layout_filter(edit.get("layout", {}), iw, ih) + f";[v]ass={ass}:fontsdir={FONTS_DIR}[out]"
-        speed = float(edit.get("speed", 1.0))
-        af = ["-af", f"atempo={speed}"] if abs(speed - 1) > 1e-3 else []
-        if abs(speed - 1) > 1e-3:
-            fc = fc.replace("[out]", f",setpts=PTS/{speed}[out]")
-        await run("ffmpeg", "-loglevel", "error", "-y", "-ss", f"{t0:.3f}", "-to", f"{t1:.3f}",
-                  "-i", str(source), "-filter_complex", fc, "-map", "[out]", "-map", "0:a?", *af,
-                  "-c:v", "libx264", "-preset", "faster", "-crf", "20", "-pix_fmt", "yuv420p",
-                  "-r", "30", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(out))
+        parts = []
+        for i, seg in enumerate(tl):
+            f = seg_speed(seg, sp)
+            parts.append(f"[0:v]trim={seg['s']:.3f}:{seg['e']:.3f},setpts=PTS-STARTPTS[r{i}]")
+            parts.append(layout_filter(edit.get("layout", {}), iw, ih, f"r{i}", f"l{i}"))
+            parts.append(f"[l{i}]fps=30{effect_filter(seg.get('effect', 'none'), seg['out_dur'])},"
+                         f"setpts=PTS/{f:.4f},fps=30,scale={OUT_W}:{OUT_H},setsar=1,format=yuv420p,settb=AVTB[v{i}]")
+            if audio:
+                at = f"atempo={f:.4f}," if abs(f - 1) > 1e-3 else ""
+                parts.append(f"[0:a]atrim={seg['s']:.3f}:{seg['e']:.3f},asetpts=PTS-STARTPTS,{at}"
+                             f"aresample=48000,aformat=channel_layouts=stereo[a{i}]")
+        vcur, acur = "v0", "a0"
+        for i in range(1, len(tl)):
+            seg, tr = tl[i], (tl[i].get("transition") or {})
+            if seg["td"] > 0:
+                parts.append(f"[{vcur}][v{i}]xfade=transition={tr.get('type', 'fade')}:duration={seg['td']:.3f}:"
+                             f"offset={seg['out_start']:.3f}[vx{i}]")
+                if audio:
+                    parts.append(f"[{acur}][a{i}]acrossfade=d={seg['td']:.3f}[ax{i}]")
+            else:
+                parts.append(f"[{vcur}][v{i}]concat=n=2:v=1:a=0[vx{i}]")
+                if audio:
+                    parts.append(f"[{acur}][a{i}]concat=n=2:v=0:a=1[ax{i}]")
+            vcur, acur = f"vx{i}", f"ax{i}"
+        parts.append(f"[{vcur}]ass={ass}:fontsdir={FONTS_DIR}[out]")
+        amap = ["-map", f"[{acur}]"] if audio else []
+        await run("ffmpeg", "-loglevel", "error", "-y", "-i", str(source), "-filter_complex", ";".join(parts),
+                  "-map", "[out]", *amap, "-c:v", "libx264", "-preset", "faster", "-crf", "20",
+                  "-pix_fmt", "yuv420p", "-r", "30", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart",
+                  str(out))
     log.info("rendu: %s", out)
+    return out
+
+
+async def normalize_part(src: Path, t0: float, t1: float, out: Path) -> Path:
+    """Morceau 1920x1080 30 fps homogène (pour assembler des clips de sources différentes)."""
+    await run("ffmpeg", "-loglevel", "error", "-y", "-ss", f"{max(t0, 0):.3f}", "-i", str(src), "-t", f"{t1 - t0:.3f}",
+              "-vf", "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,fps=30,setsar=1",
+              "-af", "aresample=48000", "-ac", "2", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+              "-c:a", "aac", "-b:a", "192k", str(out))
+    return out
+
+
+async def concat_parts(parts: list[Path], out: Path) -> Path:
+    lst = out.parent / "parts.txt"
+    lst.write_text("".join(f"file '{p.resolve()}'\n" for p in parts))
+    await run("ffmpeg", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0", "-i", str(lst), "-c", "copy",
+              "-movflags", "+faststart", str(out))
+    lst.unlink(missing_ok=True)
     return out

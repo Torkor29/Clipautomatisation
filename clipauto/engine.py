@@ -23,7 +23,10 @@ log = logging.getLogger(__name__)
 
 
 def default_edit(settings: dict, trim: tuple[float, float], title: str = "") -> dict:
-    return {"trim": list(trim), "style": dict(settings["style"]), "layout": dict(settings["layout"]),
+    tr = settings.get("compilation", {}).get("transition", "fade")
+    return {"trim": list(trim), "segments": [{"s": trim[0], "e": trim[1], "effect": "none",
+                                               "transition": {"type": tr, "duration": 0.4}}],
+            "style": dict(settings["style"]), "layout": dict(settings["layout"]),
             "hook": dict(settings["hook"]), "title": title, "captions": True, "speed": 1.0}
 
 
@@ -207,14 +210,70 @@ class Engine:
                 out = await clipper.render(src, clip["words"], clip["edit"], src.parent / f"final_{int(time.time())}.mp4")
             old = clip.get("path")
             e = clip["edit"]
-            thumb = await clipper.thumbnail(out, min(1.5, (e["trim"][1] - e["trim"][0]) / 2), src.parent / "thumb.jpg")
+            thumb = await clipper.thumbnail(out, min(1.5, clipper.output_duration(e) / 2), src.parent / "thumb.jpg")
             self.db.update_clip(cid, path=str(out), thumb=str(thumb), render_status="done", title=e.get("title", ""),
-                                duration=(e["trim"][1] - e["trim"][0]) / float(e.get("speed", 1) or 1))
+                                duration=clipper.output_duration(e))
             if old and old != str(out):
                 Path(old).unlink(missing_ok=True)
         except Exception as ex:
             log.exception("rendu")
             self.db.update_clip(cid, render_status="error", error=str(ex)[-500:])
+
+    # ---------- résumé de live (compilation de plusieurs clips)
+    async def build_compilation(self, jid: int, clip_ids: list[int], title: str, transition: str,
+                                tdur: float, max_each: float | None, effect: str = "none",
+                                intro_text: bool = True) -> None:
+        cfg = self.db.settings()
+        try:
+            clips = [c for c in (self.db.clip(i) for i in clip_ids) if c]
+            if len(clips) < 2:
+                raise RuntimeError("il faut au moins 2 clips")
+            work = self.data / "clips" / f"compil_{jid}"
+            work.mkdir(parents=True, exist_ok=True)
+            parts, words, segs, t = [], [], [], 0.0
+            for n, c in enumerate(clips):
+                self.db.update_job(jid, message=f"préparation {n + 1}/{len(clips)}…", progress=0.1 + 0.5 * n / len(clips))
+                for k, sg in enumerate(clipper.segments_of(c["edit"])):
+                    s0, s1 = sg["s"], sg["e"]
+                    if max_each and k == 0 and s1 - s0 > max_each:  # garde la fin (la chute) du moment
+                        s0 = s1 - max_each
+                    part = await clipper.normalize_part(Path(c["source"]), s0, s1, work / f"p{len(parts):03}.mp4")
+                    d = await clipper.probe_duration(part)
+                    parts.append(part)
+                    words += [{"w": w["w"], "s": round(t + w["s"] - s0, 3), "e": round(t + min(w["e"], s1) - s0, 3)}
+                              for w in c["words"] if s0 <= w["s"] < s1]
+                    segs.append({"s": round(t, 3), "e": round(t + d, 3), "effect": effect if effect != "none" else sg.get("effect", "none"),
+                                 "transition": {"type": transition if k == 0 else
+                                                (sg.get("transition") or {}).get("type", "cut"),
+                                                "duration": tdur}, "from_clip": c["id"]})
+                    t += d
+            self.db.update_job(jid, message="assemblage…", progress=0.65)
+            src = await clipper.concat_parts(parts, work / "source.mp4")
+            for p in parts:
+                p.unlink(missing_ok=True)
+            first = clips[0]
+            edit = default_edit(cfg, (0, t), title)
+            edit.update(segments=segs, layout=dict(first["edit"].get("layout") or cfg["layout"]))
+            edit["hook"]["enabled"] = intro_text
+            thumb = await clipper.thumbnail(src, 1, work / "thumb.jpg")
+            cid = self.db.add_clip(streamer=first["streamer"], platform=first["platform"], source=str(src),
+                                   thumb=str(thumb), score=max(c["score"] or 0 for c in clips),
+                                   detail={"compilation": clip_ids}, transcript=" ".join(w["w"] for w in words),
+                                   words=words, edit=edit, title=title, duration=clipper.output_duration(edit),
+                                   origin="compilation")
+            self.db.update_job(jid, message="rendu…", progress=0.75)
+            await self.render_clip(cid)
+            self.db.update_job(jid, status="done", progress=1, message=f"résumé créé → clip #{cid}")
+        except Exception as ex:
+            log.exception("compilation")
+            self.db.update_job(jid, status="error", message=str(ex)[-300:])
+
+    def best_clips(self, streamer: str | None, hours: float, n: int) -> list[int]:
+        since = time.time() - hours * 3600
+        rows = [c for c in self.db.clips(limit=2000) if c["created"] >= since and c["status"] != "rejected"
+                and c["origin"] != "compilation" and (not streamer or c["streamer"] == streamer)]
+        best = sorted(rows, key=lambda c: -(c["score"] or 0))[:n]
+        return [c["id"] for c in sorted(best, key=lambda c: c["created"])]  # ordre chronologique
 
     # ---------- import (VOD Twitch/Kick/YouTube ou fichier)
     async def import_video(self, jid: int, path: Path | None, url: str | None, opts: dict) -> None:

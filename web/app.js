@@ -52,7 +52,11 @@ async function refreshIntegrations() {
 async function viewClips(v) {
   let filter = sessionStorage.getItem("cf") || "";
   v.append(h(`<div class="row"><div><h1>Clips</h1><p class="sub">Moments forts détectés automatiquement sur les lives et les imports.</p></div>
-    <div class="spacer"></div><a class="btn pri" href="#/import">⬆️ Importer une vidéo</a></div>`));
+    <div class="spacer"></div><button class="btn" id="selm">☑️ Sélectionner pour un résumé</button><a class="btn pri" href="#/import">⬆️ Importer une vidéo</a></div>`));
+  const picked = []; let selMode = false;
+  const bar = h(`<div class="selbar" hidden><b id="selc"></b><span style="color:var(--mute);font-size:13px">L'ordre de sélection = l'ordre dans le résumé</span><div class="spacer"></div>
+    <button class="btn sm" id="selx">Annuler</button><button class="btn pri" id="selgo">🎬 Créer le résumé</button></div>`);
+  $("#selm").onclick = () => { selMode = !selMode; picked.length = 0; sig = ""; load(); };
   const tabs = h(`<div class="tabs"></div>`); v.append(tabs);
   const grid = h(`<div class="clips"></div>`); v.append(grid);
   const T = [["", "Tous"], ["pending", "À valider"], ["approved", "Approuvés"], ["published", "Publiés"], ["rejected", "Rejetés"]];
@@ -65,8 +69,23 @@ async function viewClips(v) {
     if (nsig === sig) return; sig = nsig;
     grid.innerHTML = "";
     if (!clips.length) { grid.append(h(`<div class="empty" style="grid-column:1/-1">Aucun clip pour l'instant.<br>Ajoute des streamers ou importe une VOD.</div>`)); return; }
-    for (const c of clips) grid.append(clipCard(c, load));
+    for (const c of clips) {
+      const card = clipCard(c, load);
+      if (selMode) {
+        const n = picked.indexOf(c.id);
+        card.classList.toggle("picked", n >= 0);
+        const pk = h(`<div class="pick">${n >= 0 ? n + 1 : ""}</div>`); $(".thumb", card).append(pk);
+        $(".thumb", card).onclick = (e) => { e.stopPropagation(); const k = picked.indexOf(c.id); k >= 0 ? picked.splice(k, 1) : picked.push(c.id); sig = ""; load(); };
+        $(".thumb", card).onmouseenter = null;
+      }
+      grid.append(card);
+    }
+    bar.hidden = !selMode; $("#selc").textContent = `${picked.length} clip${picked.length > 1 ? "s" : ""} sélectionné${picked.length > 1 ? "s" : ""}`;
+    $("#selm").textContent = selMode ? "✖ Quitter la sélection" : "☑️ Sélectionner pour un résumé";
   }
+  v.append(bar);
+  $("#selx").onclick = () => { selMode = false; picked.length = 0; sig = ""; load(); };
+  $("#selgo").onclick = () => { if (picked.length < 2) return toast("Sélectionne au moins 2 clips"); compilationModal({ clip_ids: [...picked] }, () => { selMode = false; picked.length = 0; sig = ""; load(); }); };
   every(load, 5000);
 }
 
@@ -84,7 +103,7 @@ function clipCard(c, reload) {
     </div>
     <div class="meta">
       <div class="t">${esc(c.title || "Sans titre")}</div>
-      <div class="row" style="gap:6px"><span class="pill">${esc(c.streamer || "—")}</span><span class="pill ${c.status}">${statusLabel(c.status)}</span></div>
+      <div class="row" style="gap:6px"><span class="pill">${esc(c.streamer || "—")}</span><span class="pill ${c.status}">${statusLabel(c.status)}</span>${c.origin === "compilation" ? `<span class="pill" style="color:var(--acc2)">résumé</span>` : ""}</div>
       <div class="acts">
         <a class="btn sm" href="#/edit/${c.id}" title="Éditer">✂️</a>
         <button class="btn sm ok" data-a="approve" title="Approuver">✅</button>
@@ -101,6 +120,59 @@ function clipCard(c, reload) {
   }
   $$("[data-a]", el).forEach((b) => b.onclick = async () => { await api(`/api/clips/${c.id}/${b.dataset.a}`, { method: "POST" }); toast(b.dataset.a === "approve" ? "Clip approuvé ✅" : "Clip rejeté"); reload(); });
   return el;
+}
+async function compilationModal(opts, done) {
+  const S = await api("/api/settings"), C = S.compilation;
+  let ids = opts.clip_ids || [];
+  const all = await api("/api/clips");
+  const byId = Object.fromEntries(all.map((c) => [c.id, c]));
+  const m = h(`<div class="modal"><div class="card">
+    <h2>🎬 ${opts.streamer ? `Résumé du live de ${esc(opts.streamer)}` : "Créer un résumé"}</h2>
+    ${opts.streamer ? `<div class="grid2" style="gap:10px">
+        <label class="f"><b>Meilleurs moments des dernières</b><div class="inline"><input type="number" id="mh" value="${C.hours}" min="1"> h</div></label>
+        <label class="f"><b>Nombre de moments</b><input type="number" id="mn" value="${C.clips}" min="2" max="20"></label></div>
+        <button class="btn sm" id="mprev" style="margin-bottom:12px">🔎 Prévisualiser la sélection</button>` : ""}
+    <div class="ord" id="mord"></div>
+    <label class="f"><b>Titre (affiché en accroche)</b><input type="text" id="mt" value="${esc(opts.streamer ? `Le best-of de ${opts.streamer} 🔥` : "Best-of du live 🔥")}"></label>
+    <div class="grid2" style="gap:10px">
+      <label class="f"><b>Transition</b><select id="mtr">${Object.entries(META.transitions).map(([k, l]) => `<option value="${k}" ${k === C.transition ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+      <label class="f"><b>Durée de transition (s)</b><input type="number" step="0.1" id="mtd" value="${C.transition_duration}"></label>
+      <label class="f"><b>Max par moment (s)</b><input type="number" id="mme" value="${C.max_each}"><small>Garde la fin (la chute) de chaque moment</small></label>
+      <label class="f"><b>Effet sur chaque moment</b><select id="mef">${Object.entries(META.effects).map(([k, l]) => `<option value="${k}">${l}</option>`).join("")}</select></label>
+    </div>
+    <label class="inline f"><input type="checkbox" id="mit" checked> <b>Afficher le titre au début</b></label>
+    <div class="row"><div class="spacer"></div><button class="btn" id="mx">Annuler</button><button class="btn pri" id="mgo">✨ Générer</button></div>
+  </div></div>`);
+  document.body.append(m);
+  const drawOrd = () => {
+    $("#mord", m).innerHTML = ids.length ? "" : `<div style="color:var(--mute)">Aucun clip.</div>`;
+    ids.forEach((id, i) => {
+      const c = byId[id] || {};
+      const row = h(`<div><b>${i + 1}</b>${c.thumb ? `<img src="/media/${id}/thumb">` : ""}<span>${esc(c.title || "#" + id)} · ${fmt(c.duration)}</span>
+        <button class="btn sm" data-u ${i ? "" : "disabled"}>↑</button><button class="btn sm" data-d ${i < ids.length - 1 ? "" : "disabled"}>↓</button><button class="btn sm bad" data-r>✖</button></div>`);
+      $("[data-u]", row).onclick = () => { [ids[i - 1], ids[i]] = [ids[i], ids[i - 1]]; drawOrd(); };
+      $("[data-d]", row).onclick = () => { [ids[i + 1], ids[i]] = [ids[i], ids[i + 1]]; drawOrd(); };
+      $("[data-r]", row).onclick = () => { ids.splice(i, 1); drawOrd(); };
+      $("#mord", m).append(row);
+    });
+  };
+  const preview = () => {
+    const since = Date.now() / 1000 - Number($("#mh", m).value) * 3600;
+    const cand = all.filter((c) => c.streamer === opts.streamer && c.created >= since && c.status !== "rejected" && c.origin !== "compilation");
+    ids = cand.sort((a, b) => b.score - a.score).slice(0, Number($("#mn", m).value)).sort((a, b) => a.created - b.created).map((c) => c.id);
+    drawOrd();
+  };
+  if (opts.streamer) { $("#mprev", m).onclick = preview; preview(); } else drawOrd();
+  $("#mx", m).onclick = () => m.remove();
+  m.onclick = (e) => { if (e.target === m) m.remove(); };
+  $("#mgo", m).onclick = async () => {
+    if (ids.length < 2) return toast("Il faut au moins 2 moments");
+    try {
+      await api("/api/compilations", { method: "POST", json: { clip_ids: ids, title: $("#mt", m).value, transition: $("#mtr", m).value,
+        duration: Number($("#mtd", m).value), max_each: Number($("#mme", m).value), effect: $("#mef", m).value, intro_text: $("#mit", m).checked } });
+      toast("Résumé en cours de création… (onglet Importer pour suivre)", 4000); m.remove(); done && done();
+    } catch (e) { toast(e.message); }
+  };
 }
 const statusLabel = (s) => ({ pending: "À valider", approved: "Approuvé", published: "Publié", rejected: "Rejeté", error: "Erreur" }[s] || s);
 
@@ -145,6 +217,7 @@ function streamerCard(s, open, rerender) {
       </div>
       <div class="row" style="gap:6px">
         <label class="inline" title="Surveiller"><input type="checkbox" ${s.enabled ? "checked" : ""} data-x="en"> actif</label>
+        <button class="btn sm" data-x="sum" title="Résumé des meilleurs moments">🎬 Résumé</button>
         <button class="btn sm" data-x="cfg">⚙️</button>
         <button class="btn sm bad" data-x="del">🗑</button>
       </div>
@@ -154,6 +227,7 @@ function streamerCard(s, open, rerender) {
   </div>`);
   $('[data-x="en"]', el).onchange = async (e) => { await api(`/api/streamers/${s.id}`, { method: "PATCH", json: { enabled: e.target.checked } }); rerender(true); };
   $('[data-x="del"]', el).onclick = async () => { if (!confirm(`Ne plus suivre ${s.channel} ?`)) return; await api(`/api/streamers/${s.id}`, { method: "DELETE" }); rerender(true); };
+  $('[data-x="sum"]', el).onclick = () => compilationModal({ streamer: s.channel });
   $('[data-x="cfg"]', el).onclick = () => { open.has(s.id) ? open.delete(s.id) : open.add(s.id); rerender(true); };
   if (open.has(s.id)) {
     const o = s.overrides || {}, d = o.detect || {};
@@ -232,7 +306,7 @@ async function viewImport(v) {
     try { await api("/api/import", { method: "POST", body: fd }); toast("Import lancé 🚀"); } catch (e) { toast(e.message); }
     $("#ig", f).disabled = false; file = null; $("#iu", f).value = "";
   };
-  const jobs = h(`<div class="card"><h2>Imports récents</h2><div id="jl"></div></div>`); v.append(jobs);
+  const jobs = h(`<div class="card"><h2>Imports &amp; résumés en cours</h2><div id="jl"></div></div>`); v.append(jobs);
   every(async () => {
     const js = await api("/api/jobs");
     $("#jl", jobs).innerHTML = js.length ? js.map((j) => `<div class="job"><div class="row"><b style="overflow:hidden;text-overflow:ellipsis;max-width:70%">${esc(j.label)}</b><div class="spacer"></div>
@@ -283,6 +357,15 @@ async function viewSettings(v) {
      </div>
    </div>
    <div class="card"><h2>🎨 Style par défaut des nouveaux clips</h2><div id="stylebox"></div></div>
+   <div class="card"><h2>🎬 Résumés de live</h2>
+     <div class="grid2" style="gap:10px">
+      <label class="f"><b>Transition par défaut</b><select data-p="compilation.transition">${Object.entries(META.transitions).map(([k, l]) => `<option value="${k}" ${k === S.compilation.transition ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+      <label class="f"><b>Durée transition (s)</b><input type="number" step="0.1" data-p="compilation.transition_duration" data-n value="${S.compilation.transition_duration}"></label>
+      <label class="f"><b>Nombre de moments</b><input type="number" data-p="compilation.clips" data-n value="${S.compilation.clips}"></label>
+      <label class="f"><b>Max par moment (s)</b><input type="number" data-p="compilation.max_each" data-n value="${S.compilation.max_each}"></label>
+      <label class="f"><b>Fenêtre (heures)</b><input type="number" data-p="compilation.hours" data-n value="${S.compilation.hours}"></label>
+     </div>
+   </div>
    <div class="card"><h2>📤 Publication (Post for Me)</h2>
      <label class="inline f"><input type="checkbox" data-p="publish.auto_publish" ${p.auto_publish ? "checked" : ""}><b>Publier automatiquement quand j'approuve</b></label>
      <label class="f"><b>Comptes sociaux (IDs Post for Me)</b><input type="text" data-p="publish.social_accounts" data-l value="${esc(p.social_accounts.join(", "))}" placeholder="spc_xxx, spc_yyy"></label>
@@ -388,6 +471,22 @@ async function viewEditor(v, id) {
   const S = await api("/api/settings");
   E.style = { ...S.style, ...E.style }; E.layout = { ...S.layout, ...E.layout }; E.hook = { ...S.hook, ...E.hook };
   E.speed = E.speed || 1;
+  if (!E.segments || !E.segments.length) E.segments = [{ s: E.trim[0], e: E.trim[1], effect: "none", transition: { type: "fade", duration: 0.4 } }];
+  let curSeg = 0;
+  /* ---- montage : segments -> temps de la vidéo finale (même calcul que clipper.timeline) */
+  const segSpeed = (g) => E.speed * (g.effect === "slowmo" ? 0.75 : g.effect === "fast" ? 1.25 : 1);
+  function tline() {
+    let t = 0; return E.segments.map((g, i) => {
+      const d = (g.e - g.s) / segSpeed(g), tr = g.transition || {};
+      const td = i === 0 || (tr.type || "cut") === "cut" ? 0 : Math.min(tr.duration ?? 0.4, d / 2);
+      const st = t - td; t = st + d; return { ...g, os: st, od: d, td };
+    });
+  }
+  const outDur = () => { const T = tline(); return T.length ? T.at(-1).os + T.at(-1).od : 0; };
+  const segAt = (t) => E.segments.findIndex((g) => t >= g.s - 0.02 && t < g.e);
+  const outTime = (t) => { const T = tline(), i = segAt(t); return i < 0 ? 0 : T[i].os + (t - T[i].s) / segSpeed(T[i]); };
+  let reordered = E.segments.some((g, i) => i && g.s < E.segments[i - 1].s);
+  const syncTrim = () => { if (!reordered) E.segments.sort((a, b) => a.s - b.s); E.trim = [Math.min(...E.segments.map((g) => g.s)), Math.max(...E.segments.map((g) => g.e))]; };
   let dirty = false, shift = 0;
   const mark = () => { dirty = true; $("#dirty").hidden = false; draw(); };
 
@@ -410,7 +509,7 @@ async function viewEditor(v, id) {
       <div class="savebar" id="outbar"></div>
     </div>
     <div class="panel">
-      <div class="ptabs">${["Découpe", "Sous-titres", "Style", "Cadrage", "Publier"].map((t, i) => `<button data-t="${i}" class="${i ? "" : "on"}">${t}</button>`).join("")}</div>
+      <div class="ptabs">${["✂️ Montage", "Sous-titres", "Style", "Cadrage", "Publier"].map((t, i) => `<button data-t="${i}" class="${i ? "" : "on"}">${t}</button>`).join("")}</div>
       <div class="pbody" id="pb"></div>
     </div></div>`);
   v.append(ed);
@@ -447,7 +546,7 @@ async function viewEditor(v, id) {
       const fg = mk(); const fw = W * (L.mode === "blur" ? (L.zoom || 1) : 1), fh = fw * ih / iw;
       Object.assign(fg.style, { width: `${fw}px`, height: `${fh}px`, left: `${(W - fw) / 2}px`, top: `${(H - fh) / 2}px` }); b.append(fg);
     }
-    ph.append(capEl, hookEl);
+    ph.append(fx, capEl, hookEl); capEl.style.zIndex = hookEl.style.zIndex = 3;
     copies.forEach((c) => { c.currentTime = master.currentTime; });
     draw();
   }
@@ -456,7 +555,7 @@ async function viewEditor(v, id) {
   let lines = [];
   function draw() {
     const st = E.style, k = ph.clientWidth / 1080, t = master.currentTime - shift;
-    lines = groupWords(words.filter((w) => w.e > E.trim[0] && w.s < E.trim[1]), st.words_per_line, st.max_chars || 18);
+    lines = groupWords(words.filter((w) => E.segments.some((g) => w.s >= g.s - 0.01 && w.s < g.e)), st.words_per_line, st.max_chars || 18);
     let html = "";
     for (const L of lines) {
       const end = L.at(-1).e + 0.15;
@@ -471,23 +570,50 @@ async function viewEditor(v, id) {
       WebkitTextStroke: `${st.outline * 2 * k}px ${st.outline_color}`, textShadow: st.shadow ? `${st.shadow * k}px ${st.shadow * k}px 0 #00000080` : "none",
     });
     capEl.innerHTML = E.captions === false ? "" : html;
-    const hk = E.hook, showH = hk.enabled && E.title && master.currentTime - E.trim[0] < hk.seconds;
+    const hk = E.hook, showH = hk.enabled && E.title && segAt(master.currentTime) >= 0 && outTime(master.currentTime) < hk.seconds;
     Object.assign(hookEl.style, { top: `${170 * k}px`, fontFamily: `'${st.font}'`, fontSize: `${(hk.size || 72) * k}px`, color: hk.color });
     hookEl.innerHTML = showH ? `<span style="background:${hk.bg}">${esc(E.title)}</span>` : "";
-    $("#tm").textContent = `${fmt(master.currentTime - E.trim[0])} / ${fmt(E.trim[1] - E.trim[0])}`;
+    $("#tm").textContent = `${fmt(outTime(master.currentTime))} / ${fmt(outDur())}`;
     $$(".words .w").forEach((el) => { const w = words[el.dataset.i]; el.classList.toggle("cur", !!w && t >= w.s && t < w.e); });
     const tlph = $(".tl .ph"); if (tlph) tlph.style.left = `${(master.currentTime / dur) * 100}%`;
   }
   let raf;
   const loop = () => {
-    if (!master.paused && master.currentTime >= E.trim[1]) { master.pause(); master.currentTime = E.trim[0]; }
+    if (!master.paused) {
+      const t = master.currentTime, g = E.segments[curSeg];
+      if (!g || t >= g.e - 0.03 || t < g.s - 0.5) {
+        const nx = g && t >= g.e - 0.03 ? curSeg + 1 : E.segments.findIndex((x) => t < x.e);
+        if (nx < 0 || nx >= E.segments.length) { master.pause(); curSeg = 0; seek(E.segments[0].s); }
+        else { curSeg = nx; const n = E.segments[nx]; if (Math.abs(t - n.s) > 0.05) seek(n.s); flashTransition(n.transition, nx); }
+      }
+      const cg = E.segments[curSeg]; if (cg) { const r = segSpeed(cg); if (Math.abs(master.playbackRate - r) > 1e-3) master.playbackRate = r; }
+    }
+    applyEffect();
     for (const c of copies) { if (Math.abs(c.currentTime - master.currentTime) > 0.12) c.currentTime = master.currentTime; if (master.paused !== c.paused) master.paused ? c.pause() : c.play().catch(() => { }); }
     $("#pp").textContent = master.paused ? "▶︎" : "❚❚";
     draw(); raf = requestAnimationFrame(loop);
   };
   const seek = (t) => { master.currentTime = clamp(t, 0, dur); copies.forEach((c) => c.currentTime = master.currentTime); };
-  $("#pp").onclick = () => { if (master.paused) { if (master.currentTime < E.trim[0] || master.currentTime >= E.trim[1] - 0.05) seek(E.trim[0]); master.play(); } else master.pause(); };
-  $("#rw").onclick = () => seek(E.trim[0]);
+  $("#pp").onclick = () => {
+    if (master.paused) { curSeg = segAt(master.currentTime); if (curSeg < 0) { curSeg = Math.max(E.segments.findIndex((g) => master.currentTime < g.s), 0); seek(E.segments[curSeg].s); } master.play(); }
+    else master.pause();
+  };
+  $("#rw").onclick = () => { curSeg = 0; seek(E.segments[0].s); };
+  const fx = h(`<div style="position:absolute;inset:0;pointer-events:none;opacity:0;z-index:2"></div>`);
+  function flashTransition(tr, i) { // aperçu simplifié (le rendu final utilise les vraies transitions ffmpeg)
+    const type = tr?.type || "cut"; if (!i || type === "cut") return;
+    const d = (tr.duration ?? 0.4) * 1000;
+    fx.style.background = type === "fadewhite" ? "#fff" : "#000";
+    fx.animate([{ opacity: type.startsWith("fade") || type === "dissolve" ? 0.9 : 0.5 }, { opacity: 0 }], { duration: d });
+    if (/slide|wipe|smooth/.test(type)) { const dir = /left/.test(type) ? "100%,0" : /right/.test(type) ? "-100%,0" : /up/.test(type) ? "0,100%" : "0,-100%"; $$(".box", ph).forEach((b) => b.animate([{ transform: `translate(${dir})` }, { transform: "none" }], { duration: d, easing: "ease-out" })); }
+    if (["zoomin", "circleopen", "radial"].includes(type)) $$(".box", ph).forEach((b) => b.animate([{ transform: "scale(1.4)", opacity: .3 }, { transform: "none", opacity: 1 }], { duration: d }));
+  }
+  function applyEffect() {
+    const g = E.segments[segAt(master.currentTime)], ef = g?.effect || "none";
+    let tf = "none"; const p = g ? clamp((master.currentTime - g.s) / (g.e - g.s), 0, 1) : 0;
+    if (ef === "punch") tf = "scale(1.18)"; else if (ef === "zoomin") tf = `scale(${1 + 0.15 * p})`; else if (ef === "zoomout") tf = `scale(${1.15 - 0.15 * p})`;
+    $$(".box", ph).forEach((b) => { if (!b.getAnimations().length) b.style.transform = tf; b.style.filter = ef === "bw" ? "grayscale(1)" : ""; });
+  }
   $("#spd").onchange = (e) => { E.speed = Number(e.target.value); master.playbackRate = E.speed; mark(); };
   const ro = new ResizeObserver(() => buildStage()); ro.observe(ph);
   window._edCleanup = () => { cancelAnimationFrame(raf); ro.disconnect(); master.pause(); window.onbeforeunload = null; };
@@ -506,42 +632,100 @@ async function viewEditor(v, id) {
   }
 
   function tabTrim() {
+    const T = tline();
+    const trOpts = (v) => Object.entries(META.transitions).map(([k, l]) => `<option value="${k}" ${k === v ? "selected" : ""}>${l}</option>`).join("");
+    const efOpts = (v) => Object.entries(META.effects).map(([k, l]) => `<option value="${k}" ${k === v ? "selected" : ""}>${l}</option>`).join("");
     pb.append(h(`<div>
-      <div class="row"><b>Début ${fmt(E.trim[0])}</b><div class="spacer"></div><b id="dd"></b><div class="spacer"></div><b>Fin ${fmt(E.trim[1])}</b></div>
-      <div class="tl" id="tl"><canvas class="wave"></canvas><div class="sel"><div class="h l">‹</div><div class="h r">›</div></div><div class="ph"></div></div>
-      <small style="color:var(--mute)">Glisse les poignées pour couper · clic sur la frise pour se déplacer · source complète : ${fmt(dur)}</small>
-      <div class="row" style="margin-top:14px">
-        <button class="btn sm" id="sI">⇤ Début ici</button><button class="btn sm" id="sO">Fin ici ⇥</button>
+      <div class="row"><b>${E.segments.length} passage${E.segments.length > 1 ? "s" : ""}</b><div class="spacer"></div><b id="dd"></b></div>
+      <div class="tl" id="tl"><canvas class="wave"></canvas><div class="ph"></div></div>
+      <small style="color:var(--mute)">Clic sur la frise = se déplacer · glisser les poignées = couper · source complète ${fmt(dur)}</small>
+      <div class="row" style="margin-top:12px">
+        <button class="btn sm" id="split">✂️ Couper ici</button>
+        <button class="btn sm" id="addp">➕ Ajouter un passage ici</button>
         <button class="btn sm" id="snap">🧲 Caler sur les phrases</button>
-        <button class="btn sm" id="m5">−5 s</button><button class="btn sm" id="p5">+5 s</button></div>
-      <h3>Astuce</h3><p style="color:var(--mute);margin:0">Les vidéos les plus virales démarrent <b>directement dans l'action</b> : coupe les 2-3 premières secondes « vides ». Durée idéale TikTok / Shorts : 25 – 45 s.</p></div>`));
-    const tl = $("#tl"), sel = $(".sel", tl);
+        <button class="btn sm" id="allT">✨ Même transition partout</button>
+      </div>
+      <h3>Passages, effets &amp; transitions</h3>
+      <div id="segl" style="display:grid;gap:8px"></div>
+      <h3>Astuce</h3><p style="color:var(--mute);margin:0">Pour enlever un temps mort : « Couper ici » au début puis à la fin du passage ennuyeux, et supprime-le 🗑. Les vidéos virales démarrent <b>dans l'action</b> et durent 25 – 45 s.</p></div>`));
+    const tl = $("#tl");
     const upd = () => {
-      sel.style.left = `${(E.trim[0] / dur) * 100}%`; sel.style.width = `${((E.trim[1] - E.trim[0]) / dur) * 100}%`;
-      const d = E.trim[1] - E.trim[0]; $("#dd").textContent = `${d.toFixed(1)} s`; $("#dd").style.color = d < S.clip.min_seconds || d > S.clip.max_seconds ? "var(--warn)" : "";
+      const d = outDur(); $("#dd").textContent = `Durée finale ${d.toFixed(1)} s`;
+      $("#dd").style.color = d < S.clip.min_seconds || d > S.clip.max_seconds ? "var(--warn)" : "";
     };
     for (const w of words) tl.append(h(`<div class="wd" style="left:${(w.s / dur) * 100}%;width:${Math.max(((w.e - w.s) / dur) * 100, .2)}%"></div>`));
-    drawWave($("canvas", tl));
-    upd();
+    E.segments.forEach((g, i) => {
+      tl.append(h(`<div class="sel ${i === curSeg ? "cur" : ""}" data-i="${i}" style="left:${(g.s / dur) * 100}%;width:${((g.e - g.s) / dur) * 100}%"><div class="h l">‹</div><div class="h r">›</div><span class="segn">${i + 1}</span></div>`));
+    });
+    drawWave($("canvas", tl)); upd();
     const x2t = (x) => clamp((x - tl.getBoundingClientRect().left) / tl.clientWidth, 0, 1) * dur;
     let drag = null;
     tl.onpointerdown = (e) => {
-      drag = e.target.closest(".h.l") ? "l" : e.target.closest(".h.r") ? "r" : null;
-      if (!drag) seek(x2t(e.clientX)); else tl.setPointerCapture(e.pointerId);
+      const sel = e.target.closest(".sel"), hd = e.target.closest(".h");
+      if (sel) curSeg = +sel.dataset.i;
+      if (hd) { drag = { i: +sel.dataset.i, side: hd.classList.contains("l") ? "s" : "e" }; tl.setPointerCapture(e.pointerId); return; }
+      seek(x2t(e.clientX));
+      $$(".sel", tl).forEach((x) => x.classList.toggle("cur", +x.dataset.i === curSeg));
+      $$(".segc").forEach((x) => x.classList.toggle("cur", +x.dataset.i === curSeg));
     };
     tl.onpointermove = (e) => {
-      if (!drag) return; const t = x2t(e.clientX);
-      if (drag === "l") E.trim[0] = clamp(t, 0, E.trim[1] - 3); else E.trim[1] = clamp(t, E.trim[0] + 3, dur);
-      seek(drag === "l" ? E.trim[0] : E.trim[1] - 0.5); upd(); mark();
+      if (!drag) return;
+      const g = E.segments[drag.i], t = x2t(e.clientX);
+      const others = E.segments.filter((_, k) => k !== drag.i);
+      const lo = Math.max(0, ...others.filter((o) => o.e <= g.s + 0.01).map((o) => o.e));
+      const hi = Math.min(dur, ...others.filter((o) => o.s >= g.e - 0.01).map((o) => o.s));
+      if (drag.side === "s") g.s = clamp(t, reordered ? 0 : lo, g.e - 1); else g.e = clamp(t, g.s + 1, reordered ? dur : hi);
+      const el = $(`.sel[data-i="${drag.i}"]`, tl); el.style.left = `${(g.s / dur) * 100}%`; el.style.width = `${((g.e - g.s) / dur) * 100}%`;
+      seek(drag.side === "s" ? g.s : g.e - 0.4); upd(); mark();
     };
-    tl.onpointerup = () => { if (drag) showTab(0); drag = null; };
-    $("#sI").onclick = () => { E.trim[0] = clamp(master.currentTime, 0, E.trim[1] - 3); mark(); showTab(0); };
-    $("#sO").onclick = () => { E.trim[1] = clamp(master.currentTime, E.trim[0] + 3, dur); mark(); showTab(0); };
-    $("#m5").onclick = () => { E.trim[1] = clamp(E.trim[1] - 5, E.trim[0] + 3, dur); mark(); showTab(0); };
-    $("#p5").onclick = () => { E.trim[1] = clamp(E.trim[1] + 5, E.trim[0] + 3, dur); mark(); showTab(0); };
+    tl.onpointerup = () => { if (drag) { syncTrim(); showTab(0); } drag = null; };
+
+    const segl = $("#segl");
+    T.forEach((g, i) => {
+      const sg = E.segments[i];
+      if (i > 0) {
+        const tr = sg.transition ||= { type: "cut", duration: 0.4 };
+        const row = h(`<div class="row" style="gap:8px;padding-left:18px;color:var(--mute);font-size:13px">↓ transition
+          <select data-tr style="width:auto;padding:5px 8px">${trOpts(tr.type)}</select>
+          <input data-td type="number" step="0.1" min="0.1" max="2" value="${tr.duration ?? 0.4}" style="width:70px;padding:5px 8px" ${tr.type === "cut" ? "disabled" : ""}> s
+          <button class="btn sm" data-pv title="Voir la transition">👁</button></div>`);
+        $("[data-tr]", row).onchange = (e) => { tr.type = e.target.value; mark(); showTab(0); };
+        $("[data-td]", row).oninput = (e) => { tr.duration = Number(e.target.value); mark(); upd(); };
+        $("[data-pv]", row).onclick = () => { const p = E.segments[i - 1]; curSeg = i - 1; seek(Math.max(p.e - 1.5, p.s)); master.play(); };
+        segl.append(row);
+      }
+      const c = h(`<div class="segc card ${i === curSeg ? "cur" : ""}" data-i="${i}" style="padding:10px 12px">
+        <div class="row" style="gap:8px"><b>#${i + 1}</b><span style="color:var(--mute);font-size:13px">${fmt(g.s)} → ${fmt(g.e)} · ${g.od.toFixed(1)} s</span><div class="spacer"></div>
+          <select data-ef style="width:auto;padding:5px 8px" title="Effet">${efOpts(sg.effect || "none")}</select>
+          <button class="btn sm" data-go title="Lire">▶︎</button>
+          <button class="btn sm" data-up title="Monter" ${i ? "" : "disabled"}>↑</button>
+          <button class="btn sm bad" data-del title="Supprimer" ${E.segments.length > 1 ? "" : "disabled"}>🗑</button></div></div>`);
+      $("[data-ef]", c).onchange = (e) => { sg.effect = e.target.value; mark(); showTab(0); };
+      $("[data-go]", c).onclick = () => { curSeg = i; seek(sg.s); master.play(); };
+      $("[data-del]", c).onclick = () => { E.segments.splice(i, 1); curSeg = 0; syncTrim(); mark(); showTab(0); };
+      $("[data-up]", c).onclick = () => { [E.segments[i - 1], E.segments[i]] = [E.segments[i], E.segments[i - 1]]; reordered = true; syncTrim(); mark(); showTab(0); };
+      segl.append(c);
+    });
+    $("#split").onclick = () => {
+      const t = master.currentTime, i = segAt(t); if (i < 0) return toast("Place la tête de lecture dans un passage");
+      const g = E.segments[i]; if (t - g.s < 0.5 || g.e - t < 0.5) return toast("Trop près du bord du passage");
+      E.segments.splice(i + 1, 0, { s: t, e: g.e, effect: g.effect, transition: { type: "cut", duration: 0.4 } }); g.e = t;
+      curSeg = i + 1; mark(); showTab(0); toast("Passage coupé en deux ✂️");
+    };
+    $("#addp").onclick = () => {
+      const t = master.currentTime; if (segAt(t) >= 0) return toast("Déplace-toi hors des passages existants (clic sur la frise)");
+      const prev = E.segments.filter((g) => g.e <= t).sort((a, b) => b.e - a.e)[0], next = E.segments.filter((g) => g.s >= t).sort((a, b) => a.s - b.s)[0];
+      E.segments.push({ s: Math.max(t - 3, prev ? prev.e : 0), e: Math.min(t + 7, next ? next.s : dur), effect: "none",
+        transition: { type: S.compilation?.transition || "fade", duration: 0.4 } });
+      syncTrim(); mark(); showTab(0);
+    };
+    $("#allT").onclick = () => {
+      const t = E.segments.slice(1).map((g) => g.transition?.type).find((x) => x && x !== "cut") || "fade";
+      E.segments.forEach((g, i) => { if (i) g.transition = { type: t, duration: g.transition?.duration ?? 0.4 }; }); mark(); showTab(0); toast(`Transition « ${META.transitions[t]} » partout`);
+    };
     $("#snap").onclick = () => {
-      const near = (t, edge) => { let best = t, bd = 9; for (let i = 0; i < words.length - 1; i++) { const g = words[i + 1].s - words[i].e; const m = (words[i].e + words[i + 1].s) / 2; const d = Math.abs(m - t) - g; if (Math.abs(m - t) < 3 && d < bd) { bd = d; best = m; } } return best; };
-      E.trim = [near(E.trim[0]), near(E.trim[1])]; mark(); showTab(0); toast("Coupes calées sur les pauses 🧲");
+      const near = (t) => { let best = t, bd = 9; for (let i = 0; i < words.length - 1; i++) { const gp = words[i + 1].s - words[i].e; const m = (words[i].e + words[i + 1].s) / 2; const d = Math.abs(m - t) - gp; if (Math.abs(m - t) < 3 && d < bd) { bd = d; best = m; } } return best; };
+      E.segments.forEach((g) => { g.s = near(g.s); g.e = Math.max(near(g.e), g.s + 1); }); syncTrim(); mark(); showTab(0); toast("Coupes calées sur les pauses 🧲");
     };
   }
   async function drawWave(cv) {
@@ -658,7 +842,7 @@ async function viewEditor(v, id) {
   /* ---- sauvegarde & rendu */
   async function saveEdit() {
     if (shift) { words.forEach((w) => { w.s = +(w.s + shift).toFixed(3); w.e = +(w.e + shift).toFixed(3); }); shift = 0; }
-    E.trim = E.trim.map((x) => +x.toFixed(2));
+    E.segments.forEach((g) => { g.s = +g.s.toFixed(3); g.e = +g.e.toFixed(3); }); syncTrim();
     await api(`/api/clips/${clip.id}`, { method: "PATCH", json: { edit: E, words, title: E.title } });
     dirty = false; $("#dirty").hidden = true;
   }

@@ -170,3 +170,18 @@ label.f small{font-size:12px;color:var(--mute)}
   .grid2{grid-template-columns:1fr}
   .weights{grid-template-columns:110px 1fr 34px}
 }
+.tl .sel{opacity:.85}
+.tl .sel.cur{background:#8b5cf655;opacity:1;z-index:1}
+.tl .segn{position:absolute;top:3px;left:16px;font-size:11px;font-weight:700;color:#fff;text-shadow:0 1px 2px #000}
+.segc.cur{border-color:var(--acc)}
+.clipc.picked{border-color:var(--acc);box-shadow:0 0 0 2px #8b5cf666}
+.pick{position:absolute;top:10px;right:10px;width:26px;height:26px;border-radius:8px;background:#000a;border:2px solid #fff8;display:grid;place-items:center;font-weight:800;z-index:2}
+.clipc.picked .pick{background:var(--acc);border-color:var(--acc)}
+.selbar{position:sticky;bottom:16px;margin-top:18px;z-index:4;display:flex;gap:10px;align-items:center;flex-wrap:wrap;
+  background:#1b1b23ee;backdrop-filter:blur(8px);border:1px solid var(--acc);border-radius:14px;padding:12px 16px}
+.modal{position:fixed;inset:0;background:#000a;display:grid;place-items:center;z-index:8;padding:16px}
+.modal .card{width:min(560px,100%);max-height:90vh;overflow:auto}
+.ord{display:grid;gap:6px;margin-bottom:14px}
+.ord div{display:flex;gap:8px;align-items:center;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:6px 8px}
+.ord img{width:34px;height:60px;object-fit:cover;border-radius:6px}
+.ord span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}

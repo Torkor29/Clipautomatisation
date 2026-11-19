@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from .captions import FONTS, PRESETS
+from .clipper import EFFECTS, TRANSITIONS
 from .config import load_dotenv
 from .db import DEFAULT_SETTINGS
 from .engine import Engine
@@ -85,7 +86,8 @@ def create_app(data_dir: Path | None = None, start_engine: bool = True) -> FastA
 
     @app.get("/api/meta")
     def meta():
-        return {"fonts": list(FONTS), "presets": PRESETS, "defaults": DEFAULT_SETTINGS, "platforms": PLATFORMS}
+        return {"fonts": list(FONTS), "presets": PRESETS, "defaults": DEFAULT_SETTINGS, "platforms": PLATFORMS,
+                "transitions": TRANSITIONS, "effects": EFFECTS}
 
     # ------------------------------------------------------------ réglages
     @app.get("/api/settings")
@@ -221,6 +223,26 @@ def create_app(data_dir: Path | None = None, start_engine: bool = True) -> FastA
         clip_opts = {k: v for k, v in (("min_seconds", min_seconds), ("max_seconds", max_seconds)) if v}
         bg(eng.import_video(jid, path, url, {"streamer": streamer, "max_clips": max_clips, "clip": clip_opts}))
         return {"job": jid}
+
+    @app.post("/api/compilations")
+    async def compilation(clip_ids: list[int] | None = Body(None), streamer: str | None = Body(None),
+                          hours: float | None = Body(None), count: int | None = Body(None),
+                          title: str = Body(""), transition: str | None = Body(None),
+                          duration: float | None = Body(None), max_each: float | None = Body(None),
+                          effect: str = Body("none"), intro_text: bool = Body(True)):
+        c = eng.db.settings()["compilation"]
+        if not clip_ids:  # résumé automatique : meilleurs moments récents
+            clip_ids = eng.best_clips(streamer, hours or c["hours"], count or c["clips"])
+        if len(clip_ids) < 2:
+            raise HTTPException(400, "pas assez de clips (il en faut au moins 2)")
+        tr = transition or c["transition"]
+        if tr not in TRANSITIONS:
+            raise HTTPException(400, "transition inconnue")
+        title = title or (f"Le best-of de {streamer} 🔥" if streamer else "Best-of du live 🔥")
+        jid = eng.db.add_job("compilation", f"{title} ({len(clip_ids)} clips)")
+        bg(eng.build_compilation(jid, clip_ids, title, tr, duration or c["transition_duration"],
+                                 max_each if max_each is not None else c["max_each"], effect, intro_text))
+        return {"job": jid, "clips": clip_ids}
 
     @app.get("/api/jobs")
     def jobs():
