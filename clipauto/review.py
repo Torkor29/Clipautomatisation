@@ -33,8 +33,14 @@ class DiscordReview:
 
     async def start(self) -> None:
         import asyncio
-        asyncio.create_task(self.client.start(self.token))
-        await self.client.wait_until_ready()
+        await self.client.login(self.token)  # erreur claire si le token est invalide
+        self._conn = asyncio.create_task(self.client.connect())
+        ready = asyncio.create_task(self.client.wait_until_ready())
+        done, _ = await asyncio.wait({ready, self._conn}, return_when=asyncio.FIRST_COMPLETED)
+        if self._conn in done:
+            ready.cancel()
+            self._conn.result()  # relance l'erreur de connexion
+            raise RuntimeError("connexion Discord fermée avant d'être prête")
         log.info("bot Discord connecté")
 
     async def _channel(self):
