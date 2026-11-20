@@ -202,11 +202,12 @@ class Engine:
                        detail: dict, cfg: dict, origin: str) -> int:
         c = cfg["clip"]
         async with self.cpu:
-            words = await asyncio.to_thread(clipper.transcribe, src, c["whisper_model"], c["language"])
+            words = await asyncio.to_thread(clipper.transcribe, src, c["whisper_model"], c["language"],
+                                            c.get("streamer_only", True))
         total = await clipper.probe_duration(src)
         t0, t1 = clipper.smart_trim(words, peak, total, c["min_seconds"], c["max_seconds"],
                                     c["pre_roll"], c["post_roll"], c["snap_to_sentences"])
-        kept = [w for w in words if t0 <= w["s"] < t1]
+        kept = [w for w in words if t0 <= w["s"] < t1 and not w.get("skip")]
         title = auto_title(kept, streamer)
         # ---- pourquoi ce clip : signaux + analyse du texte (+ juge IA optionnel, plafonné)
         settings = self.db.settings()
@@ -295,7 +296,7 @@ class Engine:
                     part = await clipper.normalize_part(Path(c["source"]), s0, s1, work / f"p{len(parts):03}.mp4")
                     d = await clipper.probe_duration(part)
                     parts.append(part)
-                    words += [{"w": w["w"], "s": round(t + w["s"] - s0, 3), "e": round(t + min(w["e"], s1) - s0, 3)}
+                    words += [{**w, "s": round(t + w["s"] - s0, 3), "e": round(t + min(w["e"], s1) - s0, 3)}
                               for w in c["words"] if s0 <= w["s"] < s1]
                     segs.append({"s": round(t, 3), "e": round(t + d, 3), "effect": effect if effect != "none" else sg.get("effect", "none"),
                                  "transition": {"type": transition if k == 0 else

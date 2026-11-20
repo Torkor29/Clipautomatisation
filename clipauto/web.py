@@ -167,7 +167,7 @@ def create_app(data_dir: Path | None = None, start_engine: bool = True) -> FastA
         from . import clipper
         async with eng.cpu:
             words = await asyncio.to_thread(clipper.transcribe, Path(c["source"]), cfg["whisper_model"],
-                                            language or cfg["language"])
+                                            language or cfg["language"], cfg.get("streamer_only", True))
         eng.db.update_clip(cid, words=words)
         return {"words": words}
 

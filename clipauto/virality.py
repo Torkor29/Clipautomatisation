@@ -41,6 +41,7 @@ def _clean(w: str) -> str:
 
 def analyze_text(words: list[dict], t0: float, t1: float, keywords: list[str] | None = None) -> dict:
     """Score 0-100 + raisons. `words` en temps source, on analyse [t0, t1]."""
+    words = [w for w in words if not w.get("skip")]  # on n'analyse que ce que dit le streamer
     kept = [w for w in words if t0 <= w["s"] < t1]
     dur = max(t1 - t0, 1e-3)
     reasons: list[tuple[int, str]] = []  # (points, texte)

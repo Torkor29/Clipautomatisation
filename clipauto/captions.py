@@ -134,6 +134,8 @@ def prepare_words(words: list[dict], style: dict, keywords: list[str] | None = N
     kws = {k.lower().rstrip("*") for k in (keywords or []) if k}
     out = []
     for w in words:
+        if w.get("skip"):  # voix du jeu / autre langue : jamais en sous-titre
+            continue
         raw = w["w"].strip()
         base = re.sub(r"[^\w'’-]", "", raw.lower())
         if style.get("remove_fillers", True) and base in FILLERS:

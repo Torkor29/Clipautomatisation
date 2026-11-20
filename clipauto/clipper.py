@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import logging
 import subprocess
 import tempfile
@@ -82,22 +83,79 @@ def load_pcm(path: Path) -> np.ndarray:
     return np.frombuffer(pcm, np.int16).astype(np.float32) / 32768
 
 
-def transcribe(path: Path, model_size: str = "small", language: str | None = None) -> list[dict]:
-    """Mots avec horodatage précis (faster-whisper word_timestamps + VAD)."""
+STOP = {
+    "fr": {"le", "la", "les", "de", "des", "du", "et", "je", "tu", "il", "elle", "on", "nous", "vous", "ils", "est",
+           "c'est", "pas", "que", "qui", "un", "une", "en", "dans", "ce", "ça", "sur", "pour", "mais", "ou", "mon",
+           "ma", "mes", "ton", "ta", "là", "oui", "non", "quoi", "avec", "j'ai", "y", "frère", "vous", "les", "wesh",
+           "putain", "bah", "genre", "trop", "fait", "faut", "va", "vas", "suis", "es", "était", "moi", "toi"},
+    "en": {"the", "you", "i", "is", "are", "to", "and", "of", "a", "it", "that", "what", "this", "my", "your", "me",
+           "we", "they", "he", "she", "do", "don't", "i'm", "you're", "it's", "for", "on", "in", "with", "have",
+           "get", "got", "just", "not", "yeah", "yes", "okay", "man", "let's", "can", "will", "was", "be", "please",
+           "little", "bit", "stop", "gonna", "wanna", "right", "now", "come", "here", "look", "know", "think",
+           "maybe", "how", "much", "who", "where", "why", "there", "like", "want", "need", "fucking", "shit"},
+    "es": {"el", "la", "los", "las", "de", "que", "y", "en", "un", "una", "es", "no", "por", "con", "para", "lo",
+           "yo", "tú", "pero", "qué", "está", "muy", "como", "más", "hermano"},
+}
+
+
+def guess_lang(text: str) -> tuple[str | None, int]:
+    """Langue d'une phrase d'après ses mots-outils (gratuit, instantané). Renvoie (langue, avance)."""
+    toks = re.findall(r"[\w'’]+", text.lower().replace("’", "'"))
+    if len(toks) < 2:
+        return None, 0
+    scores = sorted(((sum(t in st for t in toks), lg) for lg, st in STOP.items()), reverse=True)
+    (best, lg), (second, _) = scores[0], scores[1]
+    return (lg, best - second) if best > second else (None, 0)
+
+
+def transcribe(path: Path, model_size: str = "small", language: str | None = None,
+               streamer_only: bool = True) -> list[dict]:
+    """Mots avec horodatage précis (faster-whisper word_timestamps + VAD).
+
+    `streamer_only` : la langue est détectée PHRASE PAR PHRASE ; les phrases dans une autre
+    langue que celle du streamer (voix des PNJ du jeu, vidéo regardée…) sont marquées
+    `skip` : gardées dans la transcription mais jamais affichées en sous-titres."""
     audio = load_pcm(path)
+    filt = bool(streamer_only and language)
+    if filt and model_size in ("tiny", "base"):  # trop petits pour distinguer les langues phrase par phrase
+        model_size = "small"
     segs, _ = _model(model_size).transcribe(audio, word_timestamps=True, vad_filter=True,
-                                            language=language or None, beam_size=5,
+                                            language=None if filt else (language or None),
+                                            multilingual=filt, beam_size=5,
                                             condition_on_previous_text=False)
     words = []
+    model = _model(model_size)
     for s in segs:
+        skip, lg = False, None
+        if filt:
+            # 1) langue entendue dans le SON de la phrase (fiable même si Whisper a « traduit »)
+            try:
+                chunk = audio[int(s.start * 16000):int(s.end * 16000)]
+                if len(chunk) > 16000 * 0.6:
+                    _, _, probs = model.detect_language(audio=chunk)
+                    pr = dict(probs)
+                    top, ptop = max(pr.items(), key=lambda x: x[1])
+                    if top != language and ptop >= 0.55 and pr.get(language, 0) < 0.25:
+                        skip, lg = True, top
+            except Exception:  # la détection ne doit jamais bloquer la transcription
+                pass
+            # 2) mots-outils du texte (rattrape les phrases courtes)
+            if not skip:
+                g, lead = guess_lang(s.text)
+                if g and g != language and lead >= 1:
+                    skip, lg = True, g
         for w in s.words or []:
             if w.word.strip():
-                words.append({"w": w.word.strip(), "s": round(w.start, 3), "e": round(w.end, 3)})
+                d = {"w": w.word.strip(), "s": round(w.start, 3), "e": round(w.end, 3)}
+                if skip:
+                    d["skip"] = True
+                    d["lang"] = lg
+                words.append(d)
     # « qu » + « 'il » → « qu'il » ; « peut » + « -être » → « peut-être »
     merged: list[dict] = []
     for w in words:
         if merged and (w["w"][:1] in "'’-" or merged[-1]["w"][-1:] in "'’"):
-            merged[-1] = {"w": merged[-1]["w"] + w["w"], "s": merged[-1]["s"], "e": w["e"]}
+            merged[-1] = {**merged[-1], "w": merged[-1]["w"] + w["w"], "e": w["e"]}
         else:
             merged.append(w)
     words = merged
@@ -199,7 +257,7 @@ def remap_words(words: list[dict], edit: dict) -> list[dict]:
         lo = seg["s"] + (seg["td"] * f if k else 0)  # pendant la transition : sous-titres du segment précédent
         for w in words:
             if w["s"] >= lo - 0.01 and w["s"] < seg["e"]:
-                out.append({"w": w["w"], "s": seg["out_start"] + (w["s"] - seg["s"]) / f,
+                out.append({**w, "s": seg["out_start"] + (w["s"] - seg["s"]) / f,
                             "e": seg["out_start"] + (min(w["e"], seg["e"]) - seg["s"]) / f})
     return out
 

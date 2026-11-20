@@ -26,3 +26,12 @@ def test_explain_signals_ratio():
 
 def test_combine_without_llm():
     assert combine(80, 40, None) == round((80 * 0.5 + 40 * 0.35) / 0.85)
+
+
+def test_guess_lang_and_skip_in_captions():
+    from clipauto.captions import prepare_words
+    from clipauto.clipper import guess_lang
+    assert guess_lang("I don't do this shit for free")[0] == "en"
+    assert guess_lang("Eh bah putain les gars")[0] == "fr"
+    w = [{"w": "salut", "s": 0, "e": .3}, {"w": "money", "s": .4, "e": .7, "skip": True}]
+    assert [x["w"] for x in prepare_words(w, {})] == ["salut"]

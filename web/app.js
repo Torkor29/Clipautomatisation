@@ -354,6 +354,8 @@ async function viewSettings(v) {
       <label class="f"><b>Après le pic (s)</b><input type="number" data-p="clip.post_roll" data-n value="${c.post_roll}"><small>La réaction</small></label>
      </div>
      <label class="f"><b>Score viral minimum : <span id="mvv">${c.min_viral}</span>/100</b><input type="range" min="0" max="90" step="5" data-p="clip.min_viral" value="${c.min_viral}" oninput="mvv.textContent=this.value"><small>En dessous, le clip est écarté automatiquement (visible dans « Rejetés » avec la raison). Monte-le si tu as trop de clips.</small></label>
+     <label class="inline f"><input type="checkbox" data-p="clip.streamer_only" ${c.streamer_only !== false ? "checked" : ""}><b>Sous-titrer uniquement le streamer</b></label>
+     <small style="color:var(--mute);display:block;margin:-8px 0 14px 27px">Les phrases dans une autre langue que celle des sous-titres (voix des PNJ du jeu, vidéo regardée en live…) sont masquées. Réactivables une par une dans la transcription. (Utilise au minimum la précision « Équilibrée ».)</small>
      <label class="inline f"><input type="checkbox" data-p="clip.snap_to_sentences" ${c.snap_to_sentences ? "checked" : ""}><b>Couper entre deux phrases (jamais au milieu d'un mot)</b></label>
      <label class="inline f"><input type="checkbox" data-p="clip.auto_render" ${c.auto_render ? "checked" : ""}><b>Rendu final automatique</b></label>
      <div class="grid2" style="gap:10px">
@@ -502,6 +504,7 @@ function prepareWords(words, st, keywords) { // identique à captions.prepare_wo
   const kws = (keywords || []).map((k) => k.toLowerCase().replace(/\*$/, "")).filter(Boolean);
   const out = [];
   for (const w of words) {
+    if (w.skip) continue; // voix du jeu / autre langue : jamais en sous-titre
     const raw = (w.w || "").trim(), b = baseWord(raw);
     if (st.remove_fillers !== false && FILLERS.has(b)) continue;
     const txt = st.clean_punct !== false ? raw.replace(/[.,;:…«»"“”()]+/g, "") : raw;
@@ -908,7 +911,7 @@ async function viewEditor(v, id) {
     const wl = $("#wl");
     words.forEach((w, i) => {
       const out = w.e <= E.trim[0] || w.s >= E.trim[1];
-      const el = h(`<span class="w ${out ? "out" : ""}" contenteditable="true" spellcheck="false" data-i="${i}">${esc(w.w)}</span>`);
+      const el = h(`<span class="w ${out || w.skip ? "out" : ""}" ${w.skip ? 'title="voix du jeu : masquée" style="text-decoration:line-through"' : ""} contenteditable="true" spellcheck="false" data-i="${i}">${esc(w.w)}</span>`);
       el.oninput = () => { w.w = el.textContent; mark(); };
       el.ondblclick = () => seek(w.s - 0.05);
       el.onkeydown = (e) => {
@@ -1069,7 +1072,7 @@ async function viewEditor(v, id) {
   /* ---- transcription éditable (phrases) */
   function sentencesOf() {
     const out = []; let cur = [];
-    words.forEach((w, i) => { cur.push(i); if (/[.?!]$/.test(w.w.trim()) || (words[i + 1] && words[i + 1].s - w.e > 0.8)) { out.push(cur); cur = []; } });
+    words.forEach((w, i) => { cur.push(i); const n = words[i + 1]; if (/[.?!]$/.test(w.w.trim()) || (n && (n.s - w.e > 0.8 || !!n.skip !== !!w.skip))) { out.push(cur); cur = []; } });
     if (cur.length) out.push(cur); return out;
   }
   function renderTranscript() {
@@ -1077,7 +1080,13 @@ async function viewEditor(v, id) {
     box.append(h(`<small style="color:var(--mute)">Clique dans une phrase pour corriger. Les mots grisés sont hors du clip. Entrée = valider.</small>`));
     for (const idx of sentencesOf()) {
       const s0 = words[idx[0]], inClip = E.segments.some((g) => s0.s >= g.s - 0.01 && s0.s < g.e);
-      const el = h(`<p class="trs ${inClip ? "" : "out"}" contenteditable="true" spellcheck="true"><span class="tt">${fmt(s0.s)}</span>${esc(idx.map((i) => words[i].w).join(" "))}</p>`);
+      const game = !!s0.skip;
+      if (game || idx.length) {
+        const tg = h(`<button class="btn sm trg ${game ? "" : "on"}" title="${game ? "Voix du jeu / autre langue : masquée des sous-titres. Cliquer pour l'afficher" : "Cliquer pour masquer cette phrase des sous-titres"}">${game ? "🎮 masquée" : "🎙️"}</button>`);
+        tg.onclick = () => { idx.forEach((i) => { if (game) delete words[i].skip; else words[i].skip = true; }); capKey = ""; mark(); renderTranscript(); };
+        box.append(tg);
+      }
+      const el = h(`<p class="trs ${inClip ? "" : "out"} ${game ? "game" : ""}" contenteditable="true" spellcheck="true"><span class="tt">${fmt(s0.s)}</span>${esc(idx.map((i) => words[i].w).join(" "))}</p>`);
       el.dataset.first = idx[0]; el.dataset.n = idx.length;
       el.onfocus = () => { seek(s0.s - 0.05); };
       el.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); el.blur(); } };
@@ -1088,7 +1097,7 @@ async function viewEditor(v, id) {
         if (toks.length === old.length) nw = old.map((w, j) => ({ ...w, w: toks[j] }));
         else { // nombre de mots différent : on répartit la durée de la phrase selon la longueur des mots
           const a = old[0].s, b = old.at(-1).e, L = toks.reduce((x, t) => x + t.length + 1, 0); let t = a;
-          nw = toks.map((tk) => { const d = (b - a) * (tk.length + 1) / L, w = { w: tk, s: +t.toFixed(3), e: +(t + d * 0.92).toFixed(3) }; t += d; return w; });
+          nw = toks.map((tk) => { const d = (b - a) * (tk.length + 1) / L, w = { w: tk, s: +t.toFixed(3), e: +(t + d * 0.92).toFixed(3), ...(old[0].skip ? { skip: true } : {}) }; t += d; return w; });
         }
         words.splice(idx[0], idx.length, ...nw); mark(); renderTranscript(); toast("Transcription corrigée ✏️");
       };

@@ -213,3 +213,5 @@ label.f small{font-size:12px;color:var(--mute)}
 .trs:hover{background:var(--panel2)}.trs:focus{background:var(--bg);box-shadow:0 0 0 1px var(--acc)}
 .trs.out{opacity:.4}
 .trs .tt{color:var(--mute);font-size:11px;margin-right:8px;font-variant-numeric:tabular-nums;user-select:none}
+.trg{float:right;margin:6px 0 0 6px;padding:3px 8px;font-size:12px}
+.trs.game{opacity:.45;text-decoration:line-through}
