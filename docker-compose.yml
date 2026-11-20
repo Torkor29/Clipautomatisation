@@ -2,6 +2,7 @@ services:
   clipauto:
     build: .
     restart: unless-stopped
+    init: true   # petit init (tini) qui « ramasse » les processus terminés : plus de zombies
     env_file: .env
     ports:
       - "8000:8000"
