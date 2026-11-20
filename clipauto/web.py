@@ -77,7 +77,10 @@ def create_app(data_dir: Path | None = None, start_engine: bool = True) -> FastA
                     tok = None
             if not tok or not secrets.compare_digest(tok, password):
                 return JSONResponse({"detail": "Connexion requise"}, status_code=401)
-        return await call_next(request)
+        resp = await call_next(request)
+        if path == "/" or path.endswith((".html", ".js", ".css")):
+            resp.headers["Cache-Control"] = "no-cache"  # toujours la dernière version de l'interface
+        return resp
 
     app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["*"], allow_headers=["*"],
                        expose_headers=["Content-Range", "Accept-Ranges", "Content-Length"])

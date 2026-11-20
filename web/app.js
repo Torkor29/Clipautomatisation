@@ -26,7 +26,7 @@ async function api(path, opts = {}) {
 }
 function showLogin() {
   if ($("#login")) return;
-  const m = h(`<div class="modal" id="login"><div class="card" style="width:min(380px,100%)"><div class="brand" style="padding:0 0 14px"><span class="logo">▶</span> ClipAuto</div>
+  const m = h(`<div class="modal" id="login"><div class="card" style="width:min(380px,100%)"><div class="brand" style="padding:0 0 14px"><span class="logo">${ic("play")}</span> ClipAuto</div>
     <label class="f"><b>Mot de passe</b><input type="password" id="lpw" autocomplete="current-password"></label>
     <button class="btn pri" id="lgo" style="width:100%;justify-content:center">Se connecter</button>
     <small style="color:var(--mute);display:block;margin-top:10px">${API ? `Serveur : ${esc(API)}` : ""}</small></div></div>`);
@@ -75,10 +75,10 @@ async function refreshIntegrations() {
 async function viewClips(v) {
   let filter = sessionStorage.getItem("cf") || "";
   v.append(h(`<div class="row"><div><h1>Clips</h1><p class="sub">Moments forts détectés automatiquement sur les lives et les imports.</p></div>
-    <div class="spacer"></div><button class="btn" id="selm">☑️ Sélectionner pour un résumé</button><a class="btn pri" href="#/import">⬆️ Importer une vidéo</a></div>`));
+    <div class="spacer"></div><button class="btn" id="selm">${ic("square-check")} Sélectionner pour un résumé</button><a class="btn pri" href="#/import">${ic("upload")} Importer une vidéo</a></div>`));
   const picked = []; let selMode = false;
   const bar = h(`<div class="selbar" hidden><b id="selc"></b><span style="color:var(--mute);font-size:13px">L'ordre de sélection = l'ordre dans le résumé</span><div class="spacer"></div>
-    <button class="btn sm" id="selx">Annuler</button><button class="btn pri" id="selgo">🎬 Créer le résumé</button></div>`);
+    <button class="btn sm" id="selx">Annuler</button><button class="btn pri" id="selgo">${ic("clapperboard")} Créer le résumé</button></div>`);
   $("#selm").onclick = () => { selMode = !selMode; picked.length = 0; sig = ""; load(); };
   const tabs = h(`<div class="tabs"></div>`); v.append(tabs);
   const grid = h(`<div class="clips"></div>`); v.append(grid);
@@ -104,7 +104,7 @@ async function viewClips(v) {
       grid.append(card);
     }
     bar.hidden = !selMode; $("#selc").textContent = `${picked.length} clip${picked.length > 1 ? "s" : ""} sélectionné${picked.length > 1 ? "s" : ""}`;
-    $("#selm").textContent = selMode ? "✖ Quitter la sélection" : "☑️ Sélectionner pour un résumé";
+    $("#selm").textContent = selMode ? "Quitter la sélection" : "Sélectionner pour un résumé";
   }
   v.append(bar);
   $("#selx").onclick = () => { selMode = false; picked.length = 0; sig = ""; load(); };
@@ -122,19 +122,19 @@ function clipCard(c, reload) {
       ${c.thumb ? `<img loading="lazy" src="${MB}/media/${c.id}/thumb?v=${c.render_status}">` : ""}
       <div class="score ${cls}">${sc}<small>VIRAL</small></div>
       <div class="dur">${fmt(c.duration)}</div>
-      ${rendering ? `<div class="rstat">⏳ rendu en cours…</div>` : ""}
-      ${c.render_status === "error" ? `<div class="rstat">⚠️ échec du rendu</div>` : ""}
+      ${rendering ? `<div class="rstat">${ic("loader")} rendu en cours…</div>` : ""}
+      ${c.render_status === "error" ? `<div class="rstat">${ic("triangle-alert")} échec du rendu</div>` : ""}
     </div>
     <div class="meta">
       <div class="t">${esc(c.title || "Sans titre")}</div>
-      ${why ? `<div class="reason-line" title="${esc(why)}">🔍 ${esc(why)}</div>` : ""}
+      ${why ? `<div class="reason-line" title="${esc(why)}">${ic("search")} ${esc(why)}</div>` : ""}
       ${c.status === "rejected" && c.error ? `<div class="reason-line" style="color:var(--warn)">${esc(c.error)}</div>` : ""}
       <div class="row" style="gap:6px"><span class="pill">${esc(c.streamer || "—")}</span><span class="pill ${c.status}">${statusLabel(c.status)}</span>${c.origin === "compilation" ? `<span class="pill" style="color:var(--acc2)">résumé</span>` : ""}</div>
       <div class="acts">
-        <a class="btn sm" href="#/edit/${c.id}" title="Éditer">✂️</a>
-        <button class="btn sm ok" data-a="approve" title="Approuver">✅</button>
-        <button class="btn sm bad" data-a="reject" title="Rejeter">✖</button>
-        ${c.path ? `<a class="btn sm" href="${MB}/media/${c.id}/final?dl=1" title="Télécharger">⬇️</a>` : ""}
+        <a class="btn sm" href="#/edit/${c.id}" title="Éditer">${ic("scissors")}</a>
+        <button class="btn sm ok" data-a="approve" title="Approuver">${ic("check")}</button>
+        <button class="btn sm bad" data-a="reject" title="Rejeter">${ic("x")}</button>
+        ${c.path ? `<a class="btn sm" href="${MB}/media/${c.id}/final?dl=1" title="Télécharger">${ic("download")}</a>` : ""}
       </div>
     </div></div>`);
   const th = $(".thumb", el);
@@ -144,7 +144,7 @@ function clipCard(c, reload) {
     th.onmouseenter = () => { vid = h(`<video muted loop playsinline src="${MB}/media/${c.id}/final"></video>`); vid.style.position = "absolute"; vid.style.inset = 0; th.append(vid); vid.play().catch(() => { }); };
     th.onmouseleave = () => vid && vid.remove();
   }
-  $$("[data-a]", el).forEach((b) => b.onclick = async () => { await api(`/api/clips/${c.id}/${b.dataset.a}`, { method: "POST" }); toast(b.dataset.a === "approve" ? "Clip approuvé ✅" : "Clip rejeté"); reload(); });
+  $$("[data-a]", el).forEach((b) => b.onclick = async () => { await api(`/api/clips/${c.id}/${b.dataset.a}`, { method: "POST" }); toast(b.dataset.a === "approve" ? "Clip approuvé" : "Clip rejeté"); reload(); });
   return el;
 }
 function clipWhy(c) { // « pourquoi ce clip » en une phrase
@@ -161,12 +161,12 @@ async function compilationModal(opts, done) {
   const all = await api("/api/clips");
   const byId = Object.fromEntries(all.map((c) => [c.id, c]));
   const m = h(`<div class="modal"><div class="card">
-    <h2>🎬 ${opts.streamer ? `Résumé du live de ${esc(opts.streamer)}` : "Créer un résumé"}</h2>
+    <h2>${ic("clapperboard")} ${opts.streamer ? `Résumé du live de ${esc(opts.streamer)}` : "Créer un résumé"}</h2>
     ${opts.streamer ? `<div class="grid2" style="gap:10px">
         <label class="f"><b>Quels clips ?</b><select id="mpk"><option value="recent">Les derniers faits</option><option value="best">Les meilleurs scores</option></select></label>
         <label class="f"><b>Sur les dernières</b><div class="inline"><input type="number" id="mh" value="${C.hours}" min="1"> h</div></label>
         <label class="f"><b>Nombre de moments</b><input type="number" id="mn" value="${C.clips}" min="2" max="20"></label></div>
-        <button class="btn sm" id="mprev" style="margin-bottom:12px">🔎 Prévisualiser la sélection</button>` : ""}
+        <button class="btn sm" id="mprev" style="margin-bottom:12px">${ic("search")} Prévisualiser la sélection</button>` : ""}
     <div class="ord" id="mord"></div>
     <label class="f"><b>Titre (affiché en accroche)</b><input type="text" id="mt" value="${esc(opts.streamer ? `Le best-of de ${opts.streamer} 🔥` : "Best-of du live 🔥")}"></label>
     <div class="grid2" style="gap:10px">
@@ -176,7 +176,7 @@ async function compilationModal(opts, done) {
       <label class="f"><b>Effet sur chaque moment</b><select id="mef">${Object.entries(META.effects).map(([k, l]) => `<option value="${k}">${l}</option>`).join("")}</select></label>
     </div>
     <label class="inline f"><input type="checkbox" id="mit" checked> <b>Afficher le titre au début</b></label>
-    <div class="row"><div class="spacer"></div><button class="btn" id="mx">Annuler</button><button class="btn pri" id="mgo">✨ Générer</button></div>
+    <div class="row"><div class="spacer"></div><button class="btn" id="mx">Annuler</button><button class="btn pri" id="mgo">${ic("sparkles")} Générer</button></div>
   </div></div>`);
   document.body.append(m);
   const drawOrd = () => {
@@ -186,7 +186,7 @@ async function compilationModal(opts, done) {
       const why = clipWhy(c);
       const row = h(`<div><b>${i + 1}</b>${c.thumb ? `<img src="${MB}/media/${id}/thumb">` : ""}<span class="ordt"><b>${esc(c.title || "#" + id)}</b> · ${fmt(c.duration)} · ${c.detail?.viral != null ? `score ${c.detail.viral}/100` : ""}
         <small>${new Date(c.created * 1000).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })} — ${esc(why || "pas de détail (clip ancien)")}</small></span>
-        <button class="btn sm" data-u ${i ? "" : "disabled"}>↑</button><button class="btn sm" data-d ${i < ids.length - 1 ? "" : "disabled"}>↓</button><button class="btn sm bad" data-r>✖</button></div>`);
+        <button class="btn sm" data-u ${i ? "" : "disabled"}>${ic("arrow-up")}</button><button class="btn sm" data-d ${i < ids.length - 1 ? "" : "disabled"}>${ic("arrow-down")}</button><button class="btn sm bad" data-r>${ic("x")}</button></div>`);
       $("[data-u]", row).onclick = () => { [ids[i - 1], ids[i]] = [ids[i], ids[i - 1]]; drawOrd(); };
       $("[data-d]", row).onclick = () => { [ids[i + 1], ids[i]] = [ids[i], ids[i + 1]]; drawOrd(); };
       $("[data-r]", row).onclick = () => { ids.splice(i, 1); drawOrd(); };
@@ -252,13 +252,13 @@ function streamerCard(s, open, rerender) {
           ${s.live ? `<span class="pill" style="color:var(--live)"><span class="dot live"></span>EN LIVE</span>` : `<span class="pill">hors ligne</span>`}
           ${!s.enabled ? `<span class="pill">en pause</span>` : ""}
           ${Object.keys(s.overrides || {}).length ? `<span class="pill" style="color:var(--acc)">réglages perso</span>` : ""}</div>
-        ${ss ? `<div style="color:var(--mute);font-size:13px;margin-top:4px">${esc(ss.title || "")} · 👁 ${ss.viewers ?? "?"} · 💬 ${ss.chat_msgs} msgs · depuis ${fmt((Date.now() / 1000 - ss.since))}</div>` : ""}
+        ${ss ? `<div style="color:var(--mute);font-size:13px;margin-top:4px">${esc(ss.title || "")} · ${ic("eye")} ${ss.viewers ?? "?"} · ${ic("message-square")} ${ss.chat_msgs} msgs · depuis ${fmt((Date.now() / 1000 - ss.since))}</div>` : ""}
       </div>
       <div class="row" style="gap:6px">
         <label class="inline" title="Surveiller"><input type="checkbox" ${s.enabled ? "checked" : ""} data-x="en"> actif</label>
-        <button class="btn sm" data-x="sum" title="Résumé des meilleurs moments">🎬 Résumé</button>
-        <button class="btn sm" data-x="cfg">⚙️</button>
-        <button class="btn sm bad" data-x="del">🗑</button>
+        <button class="btn sm" data-x="sum" title="Résumé des meilleurs moments">${ic("clapperboard")} Résumé</button>
+        <button class="btn sm" data-x="cfg">${ic("settings")}</button>
+        <button class="btn sm bad" data-x="del">${ic("trash-2")}</button>
       </div>
     </div>
     ${ss ? sparkline(ss) : ""}
@@ -322,17 +322,17 @@ async function viewImport(v) {
         <label class="f"><b>Nombre de clips</b><input type="number" id="in" value="5" min="1" max="30"></label>
         <label class="f"><b>Durée (s)</b><div class="inline"><input type="number" id="imin" placeholder="min"><input type="number" id="imax" placeholder="max"></div></label>
       </div>
-      <button class="btn pri" id="ig" style="width:100%;justify-content:center">✨ Trouver les moments forts</button>
+      <button class="btn pri" id="ig" style="width:100%;justify-content:center">${ic("sparkles")} Trouver les moments forts</button>
       <p style="color:var(--mute);font-size:12px">Astuce : ajoute des mots-clés dans Réglages → Détection pour repérer aussi ce qui est <i>dit</i> (plus lent : transcription complète).</p>
     </div></div>`);
   v.append(f);
   let file = null;
   const dz = $("#dz", f), fi = $("#if", f);
   dz.onclick = () => fi.click();
-  fi.onchange = () => { file = fi.files[0]; dz.textContent = file ? `📁 ${file.name}` : dz.textContent; };
+  fi.onchange = () => { file = fi.files[0]; dz.textContent = file ? `${ic("folder")} ${file.name}` : dz.textContent; };
   dz.ondragover = (e) => { e.preventDefault(); dz.classList.add("on"); };
   dz.ondragleave = () => dz.classList.remove("on");
-  dz.ondrop = (e) => { e.preventDefault(); dz.classList.remove("on"); file = e.dataTransfer.files[0]; dz.textContent = `📁 ${file.name}`; };
+  dz.ondrop = (e) => { e.preventDefault(); dz.classList.remove("on"); file = e.dataTransfer.files[0]; dz.textContent = `${ic("folder")} ${file.name}`; };
   $("#ig", f).onclick = async () => {
     const fd = new FormData();
     const url = $("#iu", f).value.trim();
@@ -342,7 +342,7 @@ async function viewImport(v) {
     if ($("#imin", f).value) fd.append("min_seconds", $("#imin", f).value);
     if ($("#imax", f).value) fd.append("max_seconds", $("#imax", f).value);
     $("#ig", f).disabled = true;
-    try { await api("/api/import", { method: "POST", body: fd }); toast("Import lancé 🚀"); } catch (e) { toast(e.message); }
+    try { await api("/api/import", { method: "POST", body: fd }); toast("Import lancé"); } catch (e) { toast(e.message); }
     $("#ig", f).disabled = false; file = null; $("#iu", f).value = "";
   };
   const jobs = h(`<div class="card"><h2>Imports &amp; résumés en cours</h2><div id="jl"></div></div>`); v.append(jobs);
@@ -358,12 +358,12 @@ async function viewImport(v) {
 /* ===================================================================== SETTINGS */
 async function viewSettings(v) {
   const S = await api("/api/settings");
-  v.append(h(`<div class="row"><div><h1>Réglages</h1><p class="sub">Appliqués à chaud aux lives en cours. Chaque streamer peut avoir ses propres réglages (page Streamers → ⚙️).</p></div>
-    <div class="spacer"></div><button class="btn pri" id="sv">💾 Enregistrer</button></div>`));
+  v.append(h(`<div class="row"><div><h1>Réglages</h1><p class="sub">Appliqués à chaud aux lives en cours. Chaque streamer peut avoir ses propres réglages (page Streamers → ${ic("settings")}).</p></div>
+    <div class="spacer"></div><button class="btn pri" id="sv">${ic("save")} Enregistrer</button></div>`));
   const d = S.detect, c = S.clip, p = S.publish;
-  const names = { chat_rate: "Activité du chat", unique_chatters: "Viewers qui écrivent", laugh_emotes: "Rires (KEKW, 😂, mdr…)", hype_emotes: "Hype (Pog, W, 🔥…)", keywords: "Vos mots-clés", audio: "Pics de volume" };
+  const names = { chat_rate: "Activité du chat", unique_chatters: "Viewers qui écrivent", laugh_emotes: "Rires (KEKW, 😂, mdr…)", hype_emotes: "Hype (Pog, W, …)", keywords: "Vos mots-clés", audio: "Pics de volume" };
   const g = h(`<div class="grid2">
-   <div class="card"><h2>🎯 Détection des moments forts</h2>
+   <div class="card"><h2>${ic("crosshair")} Détection des moments forts</h2>
      <label class="f"><b>Sensibilité — seuil : <span id="thv">${d.threshold}</span></b><input type="range" min="0.5" max="5" step="0.1" data-p="detect.threshold" value="${d.threshold}" oninput="thv.textContent=this.value"><small>À gauche = plus de clips (plus de déchets) · à droite = seulement les gros moments</small></label>
      <label class="f"><b>Signaux qui doivent monter ensemble</b><select data-p="detect.min_signals" data-n>${[1, 2, 3, 4].map((n) => `<option ${n == d.min_signals ? "selected" : ""}>${n}</option>`).join("")}</select><small>2 recommandé : un spammeur seul ne déclenche rien</small></label>
      <h3>Poids de chaque signal</h3>
@@ -376,12 +376,12 @@ async function viewSettings(v) {
       <label class="f"><b>Max clips / heure</b><input type="number" data-p="detect.max_clips_per_hour" data-n value="${d.max_clips_per_hour}"></label>
      </div>
    </div>
-   <div class="card"><h2>🔤 Mots &amp; emotes</h2>
+   <div class="card"><h2>${ic("type")} Mots &amp; emotes</h2>
      <label class="f"><b>Mots-clés perso</b><textarea data-p="detect.keywords" data-l placeholder="clip, braquage, la police, nom d'un perso…">${esc(d.keywords.join(", "))}</textarea><small>Dans le chat (live) et dans ce qui est dit (imports). Terminer par * = préfixe (ex. brakage*)</small></label>
      <label class="f"><b>Rires</b><textarea data-p="detect.laugh_words" data-l>${esc(d.laugh_words.join(", "))}</textarea></label>
      <label class="f"><b>Hype</b><textarea data-p="detect.hype_words" data-l>${esc(d.hype_words.join(", "))}</textarea></label>
    </div>
-   <div class="card"><h2>✂️ Clips</h2>
+   <div class="card"><h2>${ic("scissors")} Clips</h2>
      <div class="grid2" style="gap:10px">
       <label class="f"><b>Durée min (s)</b><input type="number" data-p="clip.min_seconds" data-n value="${c.min_seconds}"></label>
       <label class="f"><b>Durée max (s)</b><input type="number" data-p="clip.max_seconds" data-n value="${c.max_seconds}"></label>
@@ -398,8 +398,8 @@ async function viewSettings(v) {
       <label class="f"><b>Précision transcription</b><select data-p="clip.whisper_model">${[["base", "Rapide"], ["small", "Équilibrée"], ["medium", "Précise (lent)"], ["large-v3", "Max (GPU)"]].map(([k, l]) => `<option value="${k}" ${k === c.whisper_model ? "selected" : ""}>${l}</option>`).join("")}</select></label>
      </div>
    </div>
-   <div class="card"><h2>🎨 Style par défaut des nouveaux clips</h2><div id="stylebox"></div></div>
-   <div class="card"><h2>🤖 Juge IA (optionnel, payant)</h2>
+   <div class="card"><h2>${ic("palette")} Style par défaut des nouveaux clips</h2><div id="stylebox"></div></div>
+   <div class="card"><h2>${ic("bot")} Juge IA (optionnel, payant)</h2>
      <p style="color:var(--mute);margin-top:0">Sans IA, l'outil analyse déjà gratuitement le chat, le son et ce qui est dit. L'IA ajoute un avis + un titre accrocheur. <b>Désactivée par défaut.</b></p>
      <label class="inline f"><input type="checkbox" data-p="ai.enabled" ${S.ai.enabled ? "checked" : ""}><b>Activer le juge IA</b></label>
      <div class="grid2" style="gap:10px">
@@ -411,7 +411,7 @@ async function viewSettings(v) {
      <label class="inline f"><input type="checkbox" data-p="ai.use_title" ${S.ai.use_title ? "checked" : ""}><b>Utiliser le titre proposé par l'IA</b></label>
      <small style="color:var(--mute)">Coût estimé avec gemini-2.5-flash-lite : ~0,0002 $ par clip (≈ 1 000 tokens) → 30 clips/jour ≈ 0,20 $/mois. Le plafond bloque tout dépassement.</small>
    </div>
-   <div class="card"><h2>🎬 Résumés de live</h2>
+   <div class="card"><h2>${ic("clapperboard")} Résumés de live</h2>
      <div class="grid2" style="gap:10px">
       <label class="f"><b>Transition par défaut</b><select data-p="compilation.transition">${Object.entries(META.transitions).map(([k, l]) => `<option value="${k}" ${k === S.compilation.transition ? "selected" : ""}>${l}</option>`).join("")}</select></label>
       <label class="f"><b>Durée transition (s)</b><input type="number" step="0.1" data-p="compilation.transition_duration" data-n value="${S.compilation.transition_duration}"></label>
@@ -420,12 +420,12 @@ async function viewSettings(v) {
       <label class="f"><b>Fenêtre (heures)</b><input type="number" data-p="compilation.hours" data-n value="${S.compilation.hours}"></label>
      </div>
    </div>
-   <div class="card"><h2>📤 Publication (Post for Me)</h2>
+   <div class="card"><h2>${ic("send")} Publication (Post for Me)</h2>
      <label class="inline f"><input type="checkbox" data-p="publish.auto_publish" ${p.auto_publish ? "checked" : ""}><b>Publier automatiquement quand j'approuve</b></label>
      <label class="f"><b>Comptes sociaux (IDs Post for Me)</b><input type="text" data-p="publish.social_accounts" data-l value="${esc(p.social_accounts.join(", "))}" placeholder="spc_xxx, spc_yyy"></label>
      <label class="f"><b>Légende</b><input type="text" data-p="publish.caption_template" value="${esc(p.caption_template)}"><small>Variables : {title} {streamer} {platform}</small></label>
    </div>
-   <div class="card"><h2>📡 Surveillance</h2>
+   <div class="card"><h2>${ic("radio")} Surveillance</h2>
      <label class="f"><b>Vérifier les lives toutes les (s)</b><input type="number" data-p="poll_seconds" data-n value="${S.poll_seconds}"></label>
      <label class="f"><b>Qualité d'enregistrement</b><input type="text" data-p="record.quality" value="${esc(S.record.quality)}"><small>Ordre de préférence Streamlink</small></label>
      <label class="f"><b>Mémoire du live (min)</b><input type="number" data-p="record.buffer_minutes" data-n value="${S.record.buffer_minutes}"></label>
@@ -444,7 +444,7 @@ async function viewSettings(v) {
       ks.slice(0, -1).forEach((k) => o = o[k] ??= {}); o[ks.at(-1)] = val;
     });
     out.style = style; out.layout = { ...S.layout, mode: layout.mode }; out.hook = hook;
-    await api("/api/settings", { method: "PUT", json: out }); toast("Réglages enregistrés ✅");
+    await api("/api/settings", { method: "PUT", json: out }); toast("Réglages enregistrés");
   };
 }
 
@@ -463,7 +463,7 @@ function styleControls(box, st, layout, hook, onChange) {
       <label class="f"><b>Mot actif</b><select data-s="highlight_mode"><option value="color" ${st.highlight_mode !== "box" ? "selected" : ""}>Couleur</option><option value="box" ${st.highlight_mode === "box" ? "selected" : ""}>Dans une boîte</option></select></label>
       <label class="f"><b>Bruitage</b><div class="inline"><select data-s="sfx">${Object.entries(META.sfx).map(([k, l]) => `<option value="${k}" ${k === (st.sfx || "none") ? "selected" : ""}>${l}</option>`).join("")}</select>
         <select data-s="sfx_on"><option value="line" ${st.sfx_on === "line" ? "selected" : ""}>chaque ligne</option><option value="emphasis" ${st.sfx_on === "emphasis" ? "selected" : ""}>mots forts</option><option value="word" ${st.sfx_on === "word" ? "selected" : ""}>chaque mot</option></select>
-        <button class="btn sm" data-sfxplay title="Écouter">🔊</button></div></label>
+        <button class="btn sm" data-sfxplay title="Écouter">${ic("volume-2")}</button></div></label>
     </div>
     <div class="row" style="margin-bottom:12px">
       <label class="inline"><input type="checkbox" data-s="glow" ${st.glow ? "checked" : ""}> Halo lumineux</label><input type="color" data-s="glow_color" value="${st.glow_color || "#FF8800"}">
@@ -603,38 +603,38 @@ async function viewEditor(v, id) {
   };
 
   v.append(h(`<div class="row" style="margin-bottom:16px">
-    <a class="btn sm" href="#/clips">← Clips</a>
+    <a class="btn sm" href="#/clips">${ic("chevron-left")} Clips</a>
     <input type="text" id="ttl" value="${esc(E.title)}" placeholder="Titre d'accroche du clip" style="flex:1;min-width:200px;font-weight:600;font-size:16px">
     <span class="pill ${clip.status}">${statusLabel(clip.status)}</span></div>`));
   const ed = h(`<div class="ed">
     <div class="stage">
       <div class="phone" id="ph"></div>
       <div class="controls">
-        <button class="btn sm" id="pp">▶︎</button><button class="btn sm" id="rw">⟲ début</button>
+        <button class="btn sm" id="pp">${ic("play")}</button><button class="btn sm" id="rw">${ic("skip-back")} début</button>
         <select id="spd" style="width:auto;padding:5px 8px">${[0.9, 1, 1.1, 1.2, 1.25].map((s) => `<option ${s == E.speed ? "selected" : ""}>${s}</option>`).join("")}</select>
         <span class="time" id="tm"></span></div>
-      <button class="btn" id="trb" style="width:100%;max-width:380px;justify-content:center">📝 Afficher la transcription</button>
+      <button class="btn" id="trb" style="width:100%;max-width:380px;justify-content:center">${ic("file-text")} Afficher la transcription</button>
       <div id="trp" class="trp" hidden></div>
       <div class="savebar">
-        <button class="btn" id="save">💾 Enregistrer</button>
-        <button class="btn pri" id="rend">🎬 Rendu final</button>
+        <button class="btn" id="save">${ic("save")} Enregistrer</button>
+        <button class="btn pri" id="rend">${ic("clapperboard")} Rendu final</button>
         <span id="dirty" class="pill pending" hidden>modifs non enregistrées</span>
       </div>
       <div class="savebar" id="outbar"></div>
     </div>
     <div class="panel">
-      <div class="ptabs">${["✂️ Montage", "Sous-titres", "Style", "Cadrage", "🧩 Calques", "🔍 Pourquoi ?", "Publier"].map((t, i) => `<button data-t="${i}" class="${i ? "" : "on"}">${t}</button>`).join("")}</div>
+      <div class="ptabs">${["Montage", "Sous-titres", "Style", "Cadrage", "Calques", "Pourquoi ?", "Publier"].map((t, i) => `<button data-t="${i}" class="${i ? "" : "on"}">${t}</button>`).join("")}</div>
       <div class="pbody" id="pb"></div>
     </div></div>`);
   v.append(ed);
   $("#ttl").oninput = (e) => { E.title = e.target.value; mark(); };
-  const tsug = h(`<div class="tsug"><span>💡 Idées de titre :</span></div>`);
+  const tsug = h(`<div class="tsug"><span>${ic("lightbulb")} Idées de titre :</span></div>`);
   $("#ttl").closest(".row").after(tsug);
   const showTitles = (list) => {
     $$("button", tsug).forEach((b) => b.parentNode.removeChild(b));
     for (const t of list) { const b = h(`<button class="chip">${esc(t)}</button>`); b.onclick = () => { E.title = t; $("#ttl").value = t; mark(); }; tsug.append(b); }
-    const r = h(`<button class="chip" title="Recalculer">🎲</button>`); r.onclick = async () => showTitles(await api(`/api/clips/${clip.id}/titles`)); tsug.append(r);
-    const n = h(`<button class="chip" title="Pas de titre">✖ aucun</button>`); n.onclick = () => { E.title = ""; $("#ttl").value = ""; mark(); }; tsug.append(n);
+    const r = h(`<button class="chip" title="Recalculer">${ic("dices")}</button>`); r.onclick = async () => showTitles(await api(`/api/clips/${clip.id}/titles`)); tsug.append(r);
+    const n = h(`<button class="chip" title="Pas de titre">${ic("x")} aucun</button>`); n.onclick = () => { E.title = ""; $("#ttl").value = ""; mark(); }; tsug.append(n);
   };
   showTitles(clip.detail?.title_options || []);
   if (!clip.detail?.title_options) api(`/api/clips/${clip.id}/titles`).then(showTitles).catch(() => { });
@@ -792,7 +792,7 @@ async function viewEditor(v, id) {
     }
     applyEffect();
     for (const c of copies) { if (Math.abs(c.currentTime - master.currentTime) > 0.12) c.currentTime = master.currentTime; if (master.paused !== c.paused) master.paused ? c.pause() : c.play().catch(() => { }); }
-    $("#pp").textContent = master.paused ? "▶︎" : "❚❚";
+    const ppi = master.paused ? "play" : "pause"; if ($("#pp").dataset.i !== ppi) { $("#pp").dataset.i = ppi; $("#pp").innerHTML = ic(ppi); }
     draw(); raf = requestAnimationFrame(loop);
   };
   const seek = (t) => { master.currentTime = clamp(t, 0, dur); copies.forEach((c) => c.currentTime = master.currentTime); };
@@ -825,7 +825,7 @@ async function viewEditor(v, id) {
   E.overlays = E.overlays || [];
   let selId = null, tlZoom = 1;
   const OCOL = { text: "#a855f7", emoji: "#f59e0b", image: "#22c55e", video: "#3b82f6", audio: "#ef4444" };
-  const OICO = { text: "T", emoji: "😀", image: "🖼", video: "🎬", audio: "🎵" };
+  const OICO = { text: ic("type"), emoji: ic("smile"), image: ic("image"), video: ic("film"), audio: ic("music") };
   const uid = () => Math.random().toString(36).slice(2, 9);
   const srcOf = (T) => { // temps final → temps source (inverse de outTime)
     const TL = tline(); let g = TL[0];
@@ -933,14 +933,14 @@ async function viewEditor(v, id) {
   /* ---------- la timeline */
   const tlx = h(`<div class="tlx card">
     <div class="row tlbar">
-      <b>🎞️ Timeline</b>
-      <button class="btn sm" data-add="text">＋ Texte</button>
-      <button class="btn sm" data-add="emoji">＋ Emoji</button>
-      <button class="btn sm" data-add="media">＋ Image / vidéo / son</button>
-      <button class="btn sm" data-x="autosfx" title="Place des bruitages sur les transitions, les apparitions et le moment fort">✨ Bruitages auto</button>
+      <b>${ic("film")} Timeline</b>
+      <button class="btn sm" data-add="text">${ic("plus")} Texte</button>
+      <button class="btn sm" data-add="emoji">${ic("plus")} Emoji</button>
+      <button class="btn sm" data-add="media">${ic("plus")} Image / vidéo / son</button>
+      <button class="btn sm" data-x="autosfx" title="Place des bruitages sur les transitions, les apparitions et le moment fort">${ic("sparkles")} Bruitages auto</button>
       <div class="spacer"></div>
-      <button class="btn sm" data-x="dup" title="Dupliquer">⧉</button>
-      <button class="btn sm bad" data-x="del" title="Supprimer">🗑</button>
+      <button class="btn sm" data-x="dup" title="Dupliquer">${ic("copy")}</button>
+      <button class="btn sm bad" data-x="del" title="Supprimer">${ic("trash-2")}</button>
       <label class="inline" style="font-size:12px;color:var(--mute)">zoom <input type="range" min="1" max="6" step="0.5" value="1" data-x="zoom" style="width:90px"></label>
     </div>
     <div class="tlscroll"><div class="tlin"><div class="ruler"></div><div class="rows"></div><div class="tph"></div></div></div>
@@ -978,7 +978,7 @@ async function viewEditor(v, id) {
       E.overlays.push({ id: uid(), type: "audio", src: `sfx:${sfx}`, track, start: +t.toFixed(2), end: +Math.min(t + 1.2, D).toFixed(2), volume: vol, auto: true });
     }
     mark(); renderTL();
-    toast(n ? `✨ ${n} bruitage${n > 1 ? "s" : ""} placé${n > 1 ? "s" : ""} (transitions, apparitions, moment fort)${removed ? " — anciens remplacés" : ""}` : "Rien à sonoriser : ajoute des transitions ou des calques");
+    toast(n ? `${ic("sparkles")} ${n} bruitage${n > 1 ? "s" : ""} placé${n > 1 ? "s" : ""} (transitions, apparitions, moment fort)${removed ? " — anciens remplacés" : ""}` : "Rien à sonoriser : ajoute des transitions ou des calques");
   };
   $('[data-x="zoom"]', tlx).oninput = (e) => { tlZoom = Number(e.target.value); renderTL(); };
 
@@ -990,10 +990,10 @@ async function viewEditor(v, id) {
     rows.innerHTML = "";
     const row = (label, cls = "") => { const r = h(`<div class="trow ${cls}"><div class="tlab">${label}</div><div class="tlane"></div></div>`); rows.append(r); return $(".tlane", r); };
     // piste vidéo principale (passages)
-    const vl = row("🎬 Vidéo", "main");
+    const vl = row("Vidéo", "main");
     tline().forEach((g, i) => vl.append(h(`<div class="tblk vid" style="left:${(g.os / D) * 100}%;width:${(g.od / D) * 100}%">#${i + 1}${g.td ? ` <i>⇄</i>` : ""}</div>`)));
     // sous-titres
-    const cl = row("💬 Sous-titres", "subs");
+    const cl = row("Sous-titres", "subs");
     const st = { ...META.caption_base, ...E.style };
     if (E.captions !== false) for (const L of groupWords(prepareWords(words.filter((w) => E.segments.some((g) => w.s >= g.s - 0.01 && w.s < g.e)), st, S.detect.keywords), st.words_per_line, st.max_chars || 18)) {
       const a = outTime(L[0].s), b = outTime(L.at(-1).e);
@@ -1051,11 +1051,11 @@ async function viewEditor(v, id) {
     $("#emok", m).onclick = () => { const v2 = $("#emi", m).value.trim(); if (v2) { m.remove(); cb(v2); } };
   }
   async function mediaLibrary(cb) {
-    const m = h(`<div class="modal"><div class="card" style="width:min(720px,100%)"><div class="row"><h2 style="margin:0">Médiathèque</h2><div class="spacer"></div><button class="btn sm" id="mlx">✖</button></div>
-      <div class="drop" id="mld" style="margin:14px 0">⬆️ Dépose une image, une vidéo ou un son (logo, B-roll, musique…) ou clique<input type="file" hidden multiple accept="image/*,video/*,audio/*"></div>
+    const m = h(`<div class="modal"><div class="card" style="width:min(720px,100%)"><div class="row"><h2 style="margin:0">Médiathèque</h2><div class="spacer"></div><button class="btn sm" id="mlx">${ic("x")}</button></div>
+      <div class="drop" id="mld" style="margin:14px 0">${ic("upload")} Dépose une image, une vidéo ou un son (logo, B-roll, musique…) ou clique<input type="file" hidden multiple accept="image/*,video/*,audio/*"></div>
       <h3>Tes médias</h3><div class="mlib" id="mll"></div>
       <h3>Bruitages intégrés</h3><div class="mlib" id="mls"></div>
-      <h3>🔎 Sons libres de droits (Openverse · Freesound…)</h3>
+      <h3>${ic("search")} Sons libres de droits (Openverse · Freesound…)</h3>
       <div class="row"><input type="text" id="osq" placeholder="whoosh, punch, rire, applause, epic music…" style="flex:1;min-width:180px">
         <select id="osk" style="width:auto"><option value="sfx">Bruitages</option><option value="music">Musiques</option></select><button class="btn pri" id="osg">Chercher</button></div>
       <small style="color:var(--mute)">Uniquement CC0 (libre) et CC BY (créditer l'auteur — noté dans la médiathèque). Astuce : cherche en anglais.</small>
@@ -1077,15 +1077,15 @@ async function viewEditor(v, id) {
       const list = await api("/api/assets"), box = $("#mll", m);
       box.innerHTML = list.length ? "" : `<div style="color:var(--mute)">Aucun média pour l'instant.</div>`;
       for (const a of list) {
-        const prev = a.kind === "image" ? `<img src="${MB}/assets/${encodeURIComponent(a.name)}">` : a.kind === "video" ? `<video muted src="${MB}/assets/${encodeURIComponent(a.name)}#t=1"></video>` : `<div class="mi">🎵</div>`;
-        const it = h(`<div class="mitem">${prev}<span>${esc(a.name)}</span><small>${a.kind}${a.duration ? ` · ${fmt(a.duration)}` : ""}</small><button class="btn sm bad" title="Supprimer">🗑</button></div>`);
+        const prev = a.kind === "image" ? `<img src="${MB}/assets/${encodeURIComponent(a.name)}">` : a.kind === "video" ? `<video muted src="${MB}/assets/${encodeURIComponent(a.name)}#t=1"></video>` : `<div class="mi">${ic("music")}</div>`;
+        const it = h(`<div class="mitem">${prev}<span>${esc(a.name)}</span><small>${a.kind}${a.duration ? ` · ${fmt(a.duration)}` : ""}</small><button class="btn sm bad" title="Supprimer">${ic("trash-2")}</button></div>`);
         it.onclick = (e) => { if (e.target.closest("button")) return; add(a); };
         $("button", it).onclick = async () => { if (confirm(`Supprimer ${a.name} ?`)) { await api(`/api/assets/${encodeURIComponent(a.name)}`, { method: "DELETE" }); load(); } };
         box.append(it);
       }
     }
     for (const [k, l] of Object.entries(META.sfx)) if (k !== "none") {
-      const it = h(`<div class="mitem"><div class="mi">🔊</div><span>${l}</span><button class="btn sm" title="Écouter">▶︎</button></div>`);
+      const it = h(`<div class="mitem"><div class="mi">${ic("volume-2")}</div><span>${l}</span><button class="btn sm" title="Écouter">${ic("play")}</button></div>`);
       it.onclick = (e) => { if (e.target.closest("button")) { new Audio(`${MB}/sfx/${k}.mp3`).play(); return; } add({ kind: "audio", name: k, sfx: true }); };
       $("#mls", m).append(it);
     }
@@ -1097,12 +1097,12 @@ async function viewEditor(v, id) {
         const res = await api(`/api/sounds/search?q=${encodeURIComponent(q)}&kind=${$("#osk", m).value}`);
         box.innerHTML = res.length ? "" : `<div style="color:var(--mute);padding:10px">Aucun son trouvé (essaie en anglais).</div>`;
         for (const r of res) {
-          const it = h(`<div class="osi"><button class="btn sm" data-p>▶︎</button><div><b>${esc(r.title)}</b><small>${fmt(r.duration)} · ${r.license.toUpperCase()} · ${esc(r.creator)} · ${esc(r.source || "")}</small></div><button class="btn sm pri" data-a>＋ Ajouter</button></div>`);
+          const it = h(`<div class="osi"><button class="btn sm" data-p>${ic("play")}</button><div><b>${esc(r.title)}</b><small>${fmt(r.duration)} · ${r.license.toUpperCase()} · ${esc(r.creator)} · ${esc(r.source || "")}</small></div><button class="btn sm pri" data-a>${ic("plus")} Ajouter</button></div>`);
           $("[data-p]", it).onclick = () => { if (player) player.pause(); player = new Audio(r.url); player.play(); };
           $("[data-a]", it).onclick = async (e) => {
-            e.target.disabled = true; e.target.textContent = "⏳";
+            e.target.disabled = true; e.target.textContent = "";
             try { const a = await api("/api/sounds/import", { method: "POST", json: r }); if (player) player.pause(); add({ kind: "audio", name: a.name, duration: r.duration, music: $("#osk", m).value === "music" }); }
-            catch (er) { toast(er.message); e.target.disabled = false; e.target.textContent = "＋ Ajouter"; }
+            catch (er) { toast(er.message); e.target.disabled = false; e.target.textContent = "Ajouter"; }
           };
           box.append(it);
         }
@@ -1134,14 +1134,14 @@ async function viewEditor(v, id) {
     const num = (k, v, step = 0.1, min = 0, max = 9999) => `<input type="number" data-o="${k}" data-n step="${step}" min="${min}" max="${max}" value="${v ?? ""}">`;
     const rng = (k, v, min, max, step) => `<input type="range" data-o="${k}" data-n min="${min}" max="${max}" step="${step}" value="${v}">`;
     const anims = (k, v) => `<select data-o="${k}">${Object.entries(k === "anim_out" ? { none: "Aucune", fade: "Fondu" } : META.ovl_anims).filter(([a]) => o.type === "text" || a !== "typewriter").map(([a, l]) => `<option value="${a}" ${a === v ? "selected" : ""}>${l}</option>`).join("")}</select>`;
-    let html = `<div class="row" style="margin-bottom:12px"><b style="font-size:15px">${OICO[o.type]} ${esc(ovlLabel(o)).slice(0, 40)}</b><div class="spacer"></div><button class="btn sm" data-b="seek">▶︎ Aller</button><button class="btn sm" data-b="here">⇤ Commencer ici</button><button class="btn sm" data-b="none">✖</button></div>
+    let html = `<div class="row" style="margin-bottom:12px"><b style="font-size:15px">${OICO[o.type]} ${esc(ovlLabel(o)).slice(0, 40)}</b><div class="spacer"></div><button class="btn sm" data-b="seek">${ic("play")} Aller</button><button class="btn sm" data-b="here">⇤ Commencer ici</button><button class="btn sm" data-b="none">${ic("x")}</button></div>
       <div class="grid2" style="gap:10px">${f("Début (s)", num("start", o.start))}${f("Fin (s)", num("end", o.end))}</div>`;
     if (o.type === "text") html += `${f("Texte", `<textarea data-o="text">${esc(o.text)}</textarea>`)}
       <div class="grid2" style="gap:10px">${f("Police", `<select data-o="font">${META.fonts.map((x) => `<option ${x === o.font ? "selected" : ""}>${x}</option>`).join("")}</select>`)}${f(`Taille ${o.size}`, rng("size", o.size, 20, 260, 1))}
       ${f("Entrée", anims("anim_in", o.anim_in))}${f("Sortie", anims("anim_out", o.anim_out))}${f(`Contour ${o.outline ?? 0}`, rng("outline", o.outline ?? 0, 0, 14, 1))}${f(`Rotation ${o.rotation || 0}°`, rng("rotation", o.rotation || 0, -30, 30, 1))}</div>
       <div class="row" style="margin-bottom:12px"><label class="inline">Texte <input type="color" data-o="color" value="${o.color || "#ffffff"}"></label><label class="inline">Contour <input type="color" data-o="outline_color" value="${o.outline_color || "#000000"}"></label>
       <label class="inline"><input type="checkbox" data-o="has_bg" ${o.bg ? "checked" : ""}> Fond</label><input type="color" data-o="bg" value="${o.bg || "#E11D48"}"><label class="inline"><input type="checkbox" data-o="uppercase" ${o.uppercase ? "checked" : ""}> MAJ</label></div>
-      <small style="color:var(--mute)">Astuce : les emojis dans un texte sortent en noir et blanc au rendu ; utilise plutôt « ＋ Emoji ».</small>`;
+      <small style="color:var(--mute)">Astuce : les emojis dans un texte sortent en noir et blanc au rendu ; utilise plutôt « ${ic("plus")} Emoji ».</small>`;
     if (o.type === "emoji") html += `${f("Emoji", `<input type="text" data-o="emoji" value="${esc(o.emoji)}">`)}`;
     if (["emoji", "image", "video"].includes(o.type)) html += `<div class="grid2" style="gap:10px">${f(`Taille ${Math.round((o.w ?? .4) * 100)}%`, rng("w", o.w ?? .4, .05, 1.2, .01))}${f(`Opacité ${o.opacity ?? 100}%`, rng("opacity", o.opacity ?? 100, 10, 100, 1))}
       ${f("Entrée", anims("anim_in", o.anim_in))}${f("Sortie", anims("anim_out", o.anim_out))}${f(`Rotation ${o.rotation || 0}°`, rng("rotation", o.rotation || 0, -45, 45, 1))}</div>`;
@@ -1149,7 +1149,7 @@ async function viewEditor(v, id) {
     if (o.type === "video") html += `<label class="inline f"><input type="checkbox" data-o="muted" ${o.muted ? "checked" : ""}><b>Couper le son de cette vidéo</b></label>`;
     if (o.type === "audio") html += `<div class="grid2" style="gap:10px">${f("Fondu d'entrée (s)", num("fade_in", o.fade_in || 0))}${f("Fondu de sortie (s)", num("fade_out", o.fade_out || 0))}</div>
       <label class="inline f"><input type="checkbox" data-o="duck" ${o.duck ? "checked" : ""}><b>Baisser automatiquement quand le streamer parle (ducking)</b></label>`;
-    html += `<div class="row" style="margin-top:8px"><button class="btn sm" data-b="dup">⧉ Dupliquer</button><button class="btn sm bad" data-b="del">🗑 Supprimer</button></div>`;
+    html += `<div class="row" style="margin-top:8px"><button class="btn sm" data-b="dup">${ic("copy")} Dupliquer</button><button class="btn sm bad" data-b="del">${ic("trash-2")} Supprimer</button></div>`;
     pb.append(h(`<div>${html}</div>`));
     $$("[data-o]", pb).forEach((i) => i.oninput = () => {
       const k = i.dataset.o;
@@ -1193,14 +1193,14 @@ async function viewEditor(v, id) {
       <div class="tl" id="tl"><canvas class="wave"></canvas><div class="ph"></div></div>
       <small style="color:var(--mute)">Clic sur la frise = se déplacer · glisser les poignées = couper · source complète ${fmt(dur)}</small>
       <div class="row" style="margin-top:12px">
-        <button class="btn sm" id="split">✂️ Couper ici</button>
-        <button class="btn sm" id="addp">➕ Ajouter un passage ici</button>
-        <button class="btn sm" id="snap">🧲 Caler sur les phrases</button>
-        <button class="btn sm" id="allT">✨ Même transition partout</button>
+        <button class="btn sm" id="split">${ic("scissors")} Couper ici</button>
+        <button class="btn sm" id="addp">${ic("plus")} Ajouter un passage ici</button>
+        <button class="btn sm" id="snap">${ic("magnet")} Caler sur les phrases</button>
+        <button class="btn sm" id="allT">${ic("sparkles")} Même transition partout</button>
       </div>
       <h3>Passages, effets &amp; transitions</h3>
       <div id="segl" style="display:grid;gap:8px"></div>
-      <h3>Astuce</h3><p style="color:var(--mute);margin:0">Pour enlever un temps mort : « Couper ici » au début puis à la fin du passage ennuyeux, et supprime-le 🗑. Les vidéos virales démarrent <b>dans l'action</b> et durent 25 – 45 s.</p></div>`));
+      <h3>Astuce</h3><p style="color:var(--mute);margin:0">Pour enlever un temps mort : « Couper ici » au début puis à la fin du passage ennuyeux, et supprime-le ${ic("trash-2")}. Les vidéos virales démarrent <b>dans l'action</b> et durent 25 – 45 s.</p></div>`));
     const tl = $("#tl");
     const upd = () => {
       const d = outDur(); $("#dd").textContent = `Durée finale ${d.toFixed(1)} s`;
@@ -1241,7 +1241,7 @@ async function viewEditor(v, id) {
         const row = h(`<div class="row" style="gap:8px;padding-left:18px;color:var(--mute);font-size:13px">↓ transition
           <select data-tr style="width:auto;padding:5px 8px">${trOpts(tr.type)}</select>
           <input data-td type="number" step="0.1" min="0.1" max="2" value="${tr.duration ?? 0.4}" style="width:70px;padding:5px 8px" ${tr.type === "cut" ? "disabled" : ""}> s
-          <button class="btn sm" data-pv title="Voir la transition">👁</button></div>`);
+          <button class="btn sm" data-pv title="Voir la transition">${ic("eye")}</button></div>`);
         $("[data-tr]", row).onchange = (e) => { tr.type = e.target.value; mark(); showTab(0); };
         $("[data-td]", row).oninput = (e) => { tr.duration = Number(e.target.value); mark(); upd(); };
         $("[data-pv]", row).onclick = () => { const p = E.segments[i - 1]; curSeg = i - 1; seek(Math.max(p.e - 1.5, p.s)); master.play(); };
@@ -1250,9 +1250,9 @@ async function viewEditor(v, id) {
       const c = h(`<div class="segc card ${i === curSeg ? "cur" : ""}" data-i="${i}" style="padding:10px 12px">
         <div class="row" style="gap:8px"><b>#${i + 1}</b><span style="color:var(--mute);font-size:13px">${fmt(g.s)} → ${fmt(g.e)} · ${g.od.toFixed(1)} s</span><div class="spacer"></div>
           <select data-ef style="width:auto;padding:5px 8px" title="Effet">${efOpts(sg.effect || "none")}</select>
-          <button class="btn sm" data-go title="Lire">▶︎</button>
-          <button class="btn sm" data-up title="Monter" ${i ? "" : "disabled"}>↑</button>
-          <button class="btn sm bad" data-del title="Supprimer" ${E.segments.length > 1 ? "" : "disabled"}>🗑</button></div></div>`);
+          <button class="btn sm" data-go title="Lire">${ic("play")}</button>
+          <button class="btn sm" data-up title="Monter" ${i ? "" : "disabled"}>${ic("arrow-up")}</button>
+          <button class="btn sm bad" data-del title="Supprimer" ${E.segments.length > 1 ? "" : "disabled"}>${ic("trash-2")}</button></div></div>`);
       $("[data-ef]", c).onchange = (e) => { sg.effect = e.target.value; mark(); showTab(0); };
       $("[data-go]", c).onclick = () => { curSeg = i; seek(sg.s); master.play(); };
       $("[data-del]", c).onclick = () => { E.segments.splice(i, 1); curSeg = 0; syncTrim(); mark(); showTab(0); };
@@ -1263,7 +1263,7 @@ async function viewEditor(v, id) {
       const t = master.currentTime, i = segAt(t); if (i < 0) return toast("Place la tête de lecture dans un passage");
       const g = E.segments[i]; if (t - g.s < 0.5 || g.e - t < 0.5) return toast("Trop près du bord du passage");
       E.segments.splice(i + 1, 0, { s: t, e: g.e, effect: g.effect, transition: { type: "cut", duration: 0.4 } }); g.e = t;
-      curSeg = i + 1; mark(); showTab(0); toast("Passage coupé en deux ✂️");
+      curSeg = i + 1; mark(); showTab(0); toast("Passage coupé en deux");
     };
     $("#addp").onclick = () => {
       const t = master.currentTime; if (segAt(t) >= 0) return toast("Déplace-toi hors des passages existants (clic sur la frise)");
@@ -1278,7 +1278,7 @@ async function viewEditor(v, id) {
     };
     $("#snap").onclick = () => {
       const near = (t) => { let best = t, bd = 9; for (let i = 0; i < words.length - 1; i++) { const gp = words[i + 1].s - words[i].e; const m = (words[i].e + words[i + 1].s) / 2; const d = Math.abs(m - t) - gp; if (Math.abs(m - t) < 3 && d < bd) { bd = d; best = m; } } return best; };
-      E.segments.forEach((g) => { g.s = near(g.s); g.e = Math.max(near(g.e), g.s + 1); }); syncTrim(); mark(); showTab(0); toast("Coupes calées sur les pauses 🧲");
+      E.segments.forEach((g) => { g.s = near(g.s); g.e = Math.max(near(g.e), g.s + 1); }); syncTrim(); mark(); showTab(0); toast("Coupes calées sur les pauses");
     };
   }
   async function drawWave(cv) {
@@ -1299,7 +1299,7 @@ async function viewEditor(v, id) {
     pb.append(h(`<div>
       <div class="row"><label class="inline"><input type="checkbox" id="cOn" ${E.captions !== false ? "checked" : ""}> Sous-titres activés</label><div class="spacer"></div>
         <select id="lang" style="width:auto">${[["fr", "FR"], ["en", "EN"], ["es", "ES"], ["", "Auto"]].map(([k, l]) => `<option value="${k}" ${k === (S.clip.language || "") ? "selected" : ""}>${l}</option>`).join("")}</select>
-        <button class="btn sm" id="retr">🔁 Re-transcrire</button></div>
+        <button class="btn sm" id="retr">${ic("refresh-cw")} Re-transcrire</button></div>
       <label class="f" style="margin-top:14px"><b>Synchro : décaler tous les sous-titres <span id="shv">${shift.toFixed(2)} s</span></b>
         <input type="range" min="-1" max="1" step="0.05" id="sh" value="${shift}"><small>Si le texte arrive trop tôt → vers la droite. Appliqué à l'enregistrement.</small></label>
       <h3>Texte (clique un mot pour le corriger · Suppr pour l'effacer · double-clic pour s'y rendre)</h3>
@@ -1307,7 +1307,7 @@ async function viewEditor(v, id) {
     $("#cOn").onchange = (e) => { E.captions = e.target.checked; mark(); };
     $("#sh").oninput = (e) => { shift = Number(e.target.value); $("#shv").textContent = `${shift.toFixed(2)} s`; mark(); };
     $("#retr").onclick = async (e) => {
-      e.target.disabled = true; e.target.textContent = "⏳ transcription…";
+      e.target.disabled = true; e.target.textContent = "transcription…";
       try { words = (await api(`/api/clips/${clip.id}/retranscribe`, { method: "POST", json: { language: $("#lang").value } })).words; toast("Transcription mise à jour"); mark(); showTab(1); } catch (er) { toast(er.message); e.target.disabled = false; }
     };
     const wl = $("#wl");
@@ -1343,24 +1343,24 @@ async function viewEditor(v, id) {
     if (L.mode === "split" || L.mode === "pip") {
       rects.push(["facecam", "face", "Cam"], ["gameplay", "game", "Jeu"]);
       const tools = h(`<div class="row" style="margin-bottom:12px">
-        <button class="btn sm" id="dfc">🎯 Détecter la cam automatiquement</button>
-        <button class="btn sm" id="svl">💾 Cadrage par défaut pour ${esc(clip.streamer || "ce streamer")}</button></div>`);
+        <button class="btn sm" id="dfc">${ic("crosshair")} Détecter la cam automatiquement</button>
+        <button class="btn sm" id="svl">${ic("save")} Cadrage par défaut pour ${esc(clip.streamer || "ce streamer")}</button></div>`);
       opts.append(tools);
       $("#dfc").onclick = async (e) => {
-        e.target.disabled = true; e.target.textContent = "⏳ analyse…";
-        try { const r = await api(`/api/clips/${clip.id}/facecam`, { method: "POST" }); L.facecam = r.facecam; buildStage(); mark(); showTab(3); toast(r.full_cam ? "Visage trouvé (cam plein écran : le format « Fond flou » peut suffire)" : "Cam détectée 🎯"); }
-        catch (er) { toast("Aucun visage trouvé — place le cadre rose à la main"); e.target.disabled = false; e.target.textContent = "🎯 Détecter la cam automatiquement"; }
+        e.target.disabled = true; e.target.textContent = "analyse…";
+        try { const r = await api(`/api/clips/${clip.id}/facecam`, { method: "POST" }); L.facecam = r.facecam; buildStage(); mark(); showTab(3); toast(r.full_cam ? "Visage trouvé (cam plein écran : le format « Fond flou » peut suffire)" : "Cam détectée"); }
+        catch (er) { toast("Aucun visage trouvé — place le cadre rose à la main"); e.target.disabled = false; e.target.textContent = "Détecter la cam automatiquement"; }
       };
       $("#svl").onclick = async () => {
         const st = await api("/api/state"); const row = st.streamers.find((x) => x.channel.toLowerCase() === (clip.streamer || "").toLowerCase());
         if (!row) return toast("Ce streamer n'est pas dans ta liste (page Streamers)");
         await api(`/api/streamers/${row.id}`, { method: "PATCH", json: { overrides: { ...row.overrides, layout: { ...L, auto_facecam: false } } } });
-        toast(`Les prochains clips de ${row.channel} utiliseront ce cadrage ✅`);
+        toast(`Les prochains clips de ${row.channel} utiliseront ce cadrage ${ic("check")}`);
       };
     }
     if (L.mode === "split") {
       opts.append(h(`<div><label class="f"><b>Répartition cam / jeu</b></label><div class="row" style="margin-bottom:10px">${[[0.5, "50 / 50"], [0.4, "40 / 60"], [0.33, "33 / 67"], [0.25, "25 / 75"]].map(([r, l]) => `<button class="btn sm ${Math.abs(L.split_ratio - r) < .01 ? "pri" : ""}" data-ratio="${r}">${l}</button>`).join("")}
-        <button class="btn sm" id="swp">⇅ Cam ${L.cam_position === "bottom" ? "en bas" : "en haut"}</button></div>
+        <button class="btn sm" id="swp">${ic("arrow-up-down")} Cam ${L.cam_position === "bottom" ? "en bas" : "en haut"}</button></div>
         <label class="f"><b>Réglage fin <span id="srv">${Math.round(L.split_ratio * 100)}%</span></b><input type="range" min="0.2" max="0.7" step="0.01" id="sr" value="${L.split_ratio}"></label></div>`));
       $$("[data-ratio]", opts).forEach((b) => b.onclick = () => { L.split_ratio = Number(b.dataset.ratio); buildStage(); mark(); showTab(3); });
       $("#swp").onclick = () => { L.cam_position = L.cam_position === "bottom" ? "top" : "bottom"; buildStage(); mark(); showTab(3); };
@@ -1424,7 +1424,7 @@ async function viewEditor(v, id) {
     if (!sig.length) ws.innerHTML = `<p style="color:var(--mute)">${clip.origin === "import" ? "Vidéo importée : pas de chat, le moment a été choisi sur les pics de son (cris, rires, réactions)." : clip.origin === "compilation" ? "Résumé : assemblage des meilleurs moments choisis." : "Pas de détail disponible."}</p>`;
     for (const x of sig) {
       const val = x.value == null ? "–" : Math.round(x.value * 10) / 10, nor = x.normal == null ? "?" : Math.round(x.normal * 10) / 10;
-      ws.append(h(`<div class="sigrow ${x.strong ? "strong" : ""}"><div class="lb">${x.strong ? "🔥 " : ""}${esc(x.label)}<small>${x.value == null ? "écart par rapport au reste de la vidéo" : `${val} pendant le moment · ${nor} habituellement`}</small></div>
+      ws.append(h(`<div class="sigrow ${x.strong ? "strong" : ""}"><div class="lb">${x.strong ? "" : ""}${esc(x.label)}<small>${x.value == null ? "écart par rapport au reste de la vidéo" : `${val} pendant le moment · ${nor} habituellement`}</small></div>
         <div class="rt">${x.ratio ? `×${x.ratio}` : `${x.z > 0 ? "+" : ""}${x.z}σ`}</div>
         <div class="bar"><div style="width:${clamp(x.z / 6, 0, 1) * 100}%;background:${x.strong ? "var(--grad)" : "#555"}"></div></div></div>`));
     }
@@ -1437,8 +1437,8 @@ async function viewEditor(v, id) {
         <small style="color:var(--mute)">Ligne orange = seuil de déclenchement (${d.threshold}). Le chat réagit ~${d.reaction ?? "?"} s après l'action : le clip est calé en conséquence.</small>`;
     }
     const wr = $("#wreas", box);
-    (a.reasons || []).forEach((r) => wr.append(h(`<li>✅ ${esc(r)}</li>`)));
-    (a.flags || []).forEach((r) => wr.append(h(`<li class="flag">⚠️ ${esc(r)}</li>`)));
+    (a.reasons || []).forEach((r) => wr.append(h(`<li>${ic("check")} ${esc(r)}</li>`)));
+    (a.flags || []).forEach((r) => wr.append(h(`<li class="flag">${ic("triangle-alert")} ${esc(r)}</li>`)));
     if (!a.reasons && !a.flags) wr.append(h(`<li>–</li>`));
     const wc = $("#wchat", box);
     if (d.chat?.length) {
@@ -1456,18 +1456,18 @@ async function viewEditor(v, id) {
     pb.append(h(`<div>
       <label class="f"><b>Légende de la publication</b><textarea id="cap">${esc(S.publish.caption_template.replace("{title}", E.title).replace("{streamer}", clip.streamer || "").replace("{platform}", clip.platform || ""))}</textarea></label>
       <div class="row">
-        <button class="btn ok" id="ap">✅ Approuver</button><button class="btn bad" id="rj">✖ Rejeter</button>
-        <button class="btn pri" id="pub">📤 Publier maintenant</button></div>
+        <button class="btn ok" id="ap">${ic("check")} Approuver</button><button class="btn bad" id="rj">${ic("x")} Rejeter</button>
+        <button class="btn pri" id="pub">${ic("send")} Publier maintenant</button></div>
       <p style="color:var(--mute);font-size:13px">La publication utilise Post for Me (clé API + IDs de comptes dans Réglages). Le rendu final est refait si besoin.</p>
       ${clip.post_id ? `<p>Publié · post <code>${esc(clip.post_id)}</code></p>` : ""}
       ${clip.error ? `<p style="color:var(--bad)">${esc(clip.error)}</p>` : ""}
       <h3>Détection</h3><div class="zs">${Object.entries(clip.detail?.z || {}).map(([k, val]) => `<span class="${val > 1.5 ? "up" : ""}">${k} ${val}</span>`).join("")}</div></div>`));
-    $("#ap").onclick = async () => { await saveEdit(); await api(`/api/clips/${clip.id}/approve`, { method: "POST" }); toast("Approuvé ✅"); };
+    $("#ap").onclick = async () => { await saveEdit(); await api(`/api/clips/${clip.id}/approve`, { method: "POST" }); toast("Approuvé"); };
     $("#rj").onclick = async () => { await api(`/api/clips/${clip.id}/reject`, { method: "POST" }); toast("Rejeté"); location.hash = "#/clips"; };
     $("#pub").onclick = async (e) => {
-      e.target.disabled = true; e.target.textContent = "⏳ publication…";
-      try { await saveEdit(); await api(`/api/clips/${clip.id}/publish`, { method: "POST", json: { caption: $("#cap").value } }); toast("Publié 🚀"); } catch (er) { toast("Échec : " + er.message, 5000); }
-      e.target.disabled = false; e.target.textContent = "📤 Publier maintenant";
+      e.target.disabled = true; e.target.textContent = "publication…";
+      try { await saveEdit(); await api(`/api/clips/${clip.id}/publish`, { method: "POST", json: { caption: $("#cap").value } }); toast("Publié"); } catch (er) { toast("Échec : " + er.message, 5000); }
+      e.target.disabled = false; e.target.textContent = "Publier maintenant";
     };
   }
 
@@ -1484,7 +1484,7 @@ async function viewEditor(v, id) {
       const s0 = words[idx[0]], inClip = E.segments.some((g) => s0.s >= g.s - 0.01 && s0.s < g.e);
       const game = !!s0.skip;
       if (game || idx.length) {
-        const tg = h(`<button class="btn sm trg ${game ? "" : "on"}" title="${game ? "Voix du jeu / autre langue : masquée des sous-titres. Cliquer pour l'afficher" : "Cliquer pour masquer cette phrase des sous-titres"}">${game ? "🎮 masquée" : "🎙️"}</button>`);
+        const tg = h(`<button class="btn sm trg ${game ? "" : "on"}" title="${game ? "Voix du jeu / autre langue : masquée des sous-titres. Cliquer pour l'afficher" : "Cliquer pour masquer cette phrase des sous-titres"}">${game ? "masquée" : ""}</button>`);
         tg.onclick = () => { idx.forEach((i) => { if (game) delete words[i].skip; else words[i].skip = true; }); capKey = ""; mark(); renderTranscript(); };
         box.append(tg);
       }
@@ -1501,12 +1501,12 @@ async function viewEditor(v, id) {
           const a = old[0].s, b = old.at(-1).e, L = toks.reduce((x, t) => x + t.length + 1, 0); let t = a;
           nw = toks.map((tk) => { const d = (b - a) * (tk.length + 1) / L, w = { w: tk, s: +t.toFixed(3), e: +(t + d * 0.92).toFixed(3), ...(old[0].skip ? { skip: true } : {}) }; t += d; return w; });
         }
-        words.splice(idx[0], idx.length, ...nw); mark(); renderTranscript(); toast("Transcription corrigée ✏️");
+        words.splice(idx[0], idx.length, ...nw); mark(); renderTranscript(); toast("Transcription corrigée");
       };
       box.append(el);
     }
   }
-  $("#trb").onclick = () => { const p = $("#trp"); p.hidden = !p.hidden; $("#trb").textContent = p.hidden ? "📝 Afficher la transcription" : "📝 Masquer la transcription"; if (!p.hidden) renderTranscript(); };
+  $("#trb").onclick = () => { const p = $("#trp"); p.hidden = !p.hidden; $("#trb").textContent = p.hidden ? "Afficher la transcription" : "Masquer la transcription"; if (!p.hidden) renderTranscript(); };
 
   /* ---- sauvegarde & rendu */
   async function saveEdit() {
@@ -1515,15 +1515,15 @@ async function viewEditor(v, id) {
     await api(`/api/clips/${clip.id}`, { method: "PATCH", json: { edit: E, words, title: E.title } });
     dirty = false; $("#dirty").hidden = true;
   }
-  $("#save").onclick = async () => { await saveEdit(); toast("Enregistré 💾"); };
-  $("#rend").onclick = async () => { await saveEdit(); await api(`/api/clips/${clip.id}/render`, { method: "POST" }); toast("Rendu lancé 🎬"); pollRender(); };
+  $("#save").onclick = async () => { await saveEdit(); toast("Enregistré"); };
+  $("#rend").onclick = async () => { await saveEdit(); await api(`/api/clips/${clip.id}/render`, { method: "POST" }); toast("Rendu lancé"); pollRender(); };
   async function pollRender() {
     const c = await api(`/api/clips/${clip.id}`);
     const ob = $("#outbar"); if (!ob) return;
-    if (["rendering", "queued"].includes(c.render_status)) { ob.innerHTML = `<span class="pill pending">⏳ rendu en cours…</span>`; setTimeout(pollRender, 2500); return; }
+    if (["rendering", "queued"].includes(c.render_status)) { ob.innerHTML = `<span class="pill pending">${ic("loader")} rendu en cours…</span>`; setTimeout(pollRender, 2500); return; }
     ob.innerHTML = c.render_status === "done" && c.path
-      ? `<a class="btn sm" target="_blank" href="${MB}/media/${c.id}/final?v=${Date.now()}">👁 Voir le rendu</a><a class="btn sm" href="${MB}/media/${c.id}/final?dl=1">⬇️ Télécharger MP4</a>`
-      : c.render_status === "error" ? `<span class="pill error" title="${esc(c.error)}">⚠️ échec du rendu</span>` : "";
+      ? `<a class="btn sm" target="_blank" href="${MB}/media/${c.id}/final?v=${Date.now()}">${ic("eye")} Voir le rendu</a><a class="btn sm" href="${MB}/media/${c.id}/final?dl=1">${ic("download")} Télécharger MP4</a>`
+      : c.render_status === "error" ? `<span class="pill error" title="${esc(c.error)}">${ic("triangle-alert")} échec du rendu</span>` : "";
   }
   pollRender();
 }

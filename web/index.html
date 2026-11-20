@@ -2,25 +2,32 @@
 <html lang="fr">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0b0d">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>ClipAuto</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>">
-<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%23edeef0'/><path d='M12 9l11 7-11 7z' fill='%230b0b0d'/></svg>">
+<link rel="preload" href="vendor/geist/Geist-Variable.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
+<header class="mtop"><span class="logo"><span data-ic="play"></span></span> ClipAuto</header>
 <aside class="side">
-  <div class="brand"><span class="logo">▶</span> ClipAuto</div>
+  <div class="brand"><span class="logo"><span data-ic="play"></span></span> ClipAuto</div>
   <nav>
-    <a href="#/clips" data-r="clips"><i>🎞️</i><span>Clips</span></a>
-    <a href="#/streamers" data-r="streamers"><i>📡</i><span>Streamers</span></a>
-    <a href="#/import" data-r="import"><i>⬆️</i><span>Importer</span></a>
-    <a href="#/settings" data-r="settings"><i>⚙️</i><span>Réglages</span></a>
+    <a href="#/clips" data-r="clips"><span data-ic="clapperboard"></span><span>Clips</span></a>
+    <a href="#/streamers" data-r="streamers"><span data-ic="radio"></span><span>Streamers</span></a>
+    <a href="#/import" data-r="import"><span data-ic="upload"></span><span>Importer</span></a>
+    <a href="#/settings" data-r="settings"><span data-ic="settings"></span><span>Réglages</span></a>
   </nav>
   <div class="side-foot" id="integrations"></div>
 </aside>
 <main id="view"></main>
 <div id="toast"></div>
-<script src="config.js"></script>
-<script src="app.js"></script>
+<script src="config.js?v=3"></script>
+<script src="icons.js?v=3"></script>
+<script>document.querySelectorAll("[data-ic]").forEach((e) => { e.outerHTML = ic(e.dataset.ic); });</script>
+<script src="app.js?v=3"></script>
 </body>
 </html>
