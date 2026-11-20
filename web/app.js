@@ -12,6 +12,10 @@ const deep = (o) => JSON.parse(JSON.stringify(o));
 /* Le front peut être servi par le VPS (même adresse) OU par Vercel : dans ce cas
    window.CLIPAUTO_API (web/config.js) = adresse https du VPS. Connexion par mot de passe (jeton). */
 const API = (window.CLIPAUTO_API || "").replace(/\/+$/, "");
+(() => { // #k=… dans l'adresse = connexion directe, puis on nettoie l'adresse
+  const m = location.hash.match(/[#&]k=([^&]+)/);
+  if (m) { try { localStorage.setItem("clipauto_token", decodeURIComponent(m[1])); } catch { } history.replaceState(null, "", location.pathname + "#/clips"); }
+})();
 let TOKEN = (() => { try { return localStorage.getItem("clipauto_token") || ""; } catch { return ""; } })();
 let MB = TOKEN ? `${API}/t/${encodeURIComponent(TOKEN)}` : API; // base des médias (img / video ne peuvent pas envoyer d'en-tête)
 async function api(path, opts = {}) {
@@ -25,29 +29,39 @@ async function api(path, opts = {}) {
   return r.status === 204 ? null : r.json();
 }
 function showLogin() {
-  // Page de connexion « simple » : vrai <form>, aucun flou / animation / transformation autour du champ
-  // (sur iPhone, un champ dans un conteneur avec backdrop-filter ou animation peut ne rien afficher).
+  // Page de connexion simple : champ TEXTE masqué par CSS (évite les soucis du gestionnaire de mots
+  // de passe d'iOS sur type=password), aucun flou / animation autour du champ.
   if ($("#login")) return;
+  try { localStorage.removeItem("clipauto_token"); } catch { }
   document.body.classList.add("is-login");
-  const m = h(`<form class="login" id="login" autocomplete="on">
+  const m = h(`<form class="login" id="login" autocomplete="off" novalidate>
+    <div class="login-hero">
+      <div class="login-mark">${ic("play")}</div>
+      <h1>ClipAuto</h1>
+      <p>Les meilleurs moments de tes lives, détectés, montés et sous-titrés automatiquement.</p>
+      <ul>
+        <li>${ic("radio")} Surveille Twitch, Kick et YouTube</li>
+        <li>${ic("sparkles")} Détecte les moments forts grâce au chat</li>
+        <li>${ic("scissors")} Clips 9:16 sous-titrés, prêts à publier</li>
+      </ul>
+    </div>
     <div class="login-box">
-      <div class="brand"><span class="logo">${ic("play")}</span> ClipAuto</div>
       <label class="f" for="lpw"><b>Mot de passe</b></label>
-      <input type="password" id="lpw" name="password" autocomplete="current-password" autocapitalize="off" autocorrect="off" spellcheck="false" required>
-      <label class="inline lshow"><input type="checkbox" id="lsh"> Afficher le mot de passe</label>
-      <button class="btn pri" type="submit">Se connecter</button>
+      <input type="text" class="pw masked" id="lpw" name="clipauto-code" inputmode="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="go" placeholder="••••••••">
+      <label class="inline lshow"><input type="checkbox" id="lsh"> Afficher</label>
+      <button class="btn pri" type="submit">Se connecter ${ic("chevron-right")}</button>
       <p class="lerr" id="lerr" hidden></p>
-      ${API ? `<small>Serveur : ${esc(API)}</small>` : ""}
+      <p class="lhint">Astuce : ouvre <code>${esc(location.origin)}/#k=TONMOTDEPASSE</code> pour te connecter sans rien taper.</p>
     </div></form>`);
   document.body.append(m);
   const pw = $("#lpw", m);
-  $("#lsh", m).onchange = (e) => { pw.type = e.target.checked ? "text" : "password"; };
+  $("#lsh", m).onchange = (e) => pw.classList.toggle("masked", !e.target.checked);
   m.onsubmit = async (e) => {
     e.preventDefault();
     const val = pw.value.trim(), err = $("#lerr", m);
     if (!val) { err.hidden = false; err.textContent = "Tape ton mot de passe."; return; }
     const r = await fetch(API + "/api/meta", { headers: { Authorization: `Bearer ${val}` } }).catch(() => null);
-    if (r && r.ok) { try { localStorage.setItem("clipauto_token", val); } catch { } location.reload(); }
+    if (r && r.ok) { try { localStorage.setItem("clipauto_token", val); } catch { } location.replace(location.pathname + "#/clips"); location.reload(); }
     else { err.hidden = false; err.textContent = r ? `Mot de passe incorrect (${val.length} caractères envoyés).` : "Serveur injoignable."; }
   };
 }
@@ -89,17 +103,25 @@ async function refreshIntegrations() {
 async function viewClips(v) {
   let filter = sessionStorage.getItem("cf") || "";
   v.append(h(`<div class="row"><div><h1>Clips</h1><p class="sub">Moments forts détectés automatiquement sur les lives et les imports.</p></div>
-    <div class="spacer"></div><button class="btn" id="selm">${ic("square-check")} Sélectionner pour un résumé</button><a class="btn pri" href="#/import">${ic("upload")} Importer une vidéo</a></div>`));
+    <div class="spacer"></div><button class="btn" id="selm">${ic("square-check")} Faire un résumé</button><a class="btn pri" href="#/import">${ic("upload")} Importer</a></div>`));
   const picked = []; let selMode = false;
   const bar = h(`<div class="selbar" hidden><b id="selc"></b><span style="color:var(--mute);font-size:13px">L'ordre de sélection = l'ordre dans le résumé</span><div class="spacer"></div>
     <button class="btn sm" id="selx">Annuler</button><button class="btn pri" id="selgo">${ic("clapperboard")} Créer le résumé</button></div>`);
   $("#selm").onclick = () => { selMode = !selMode; picked.length = 0; sig = ""; load(); };
+  const stats = h(`<div class="stats"></div>`); v.append(stats);
   const tabs = h(`<div class="tabs"></div>`); v.append(tabs);
   const grid = h(`<div class="clips"></div>`); v.append(grid);
   const T = [["", "Tous"], ["pending", "À valider"], ["approved", "Approuvés"], ["published", "Publiés"], ["rejected", "Rejetés"]];
   let sig = "";
   async function load() {
     const [clips, st] = await Promise.all([api("/api/clips" + (filter ? `?status=${filter}` : "")), api("/api/state")]);
+    const live = st.streamers.filter((x) => x.live);
+    stats.innerHTML = `
+      <a class="stat" href="#/streamers"><span>${ic("radio")} En live</span><b>${live.length}<small>/${st.streamers.length}</small></b><em>${live.length ? esc(live.map((x) => x.channel).join(", ")) : "aucun streamer en live"}</em></a>
+      <button class="stat" data-f="pending"><span>${ic("square-check")} À valider</span><b>${st.counts.pending || 0}</b><em>clips en attente</em></button>
+      <button class="stat" data-f="approved"><span>${ic("check")} Approuvés</span><b>${st.counts.approved || 0}</b><em>prêts à publier</em></button>
+      <button class="stat" data-f="published"><span>${ic("send")} Publiés</span><b>${st.counts.published || 0}</b><em>sur tes réseaux</em></button>`;
+    $$("[data-f]", stats).forEach((b) => b.onclick = () => { filter = b.dataset.f; sessionStorage.setItem("cf", filter); sig = ""; load(); });
     tabs.innerHTML = T.map(([k, l]) => `<button data-k="${k}" class="${k === filter ? "on" : ""}">${l}${k && st.counts[k] ? ` · ${st.counts[k]}` : ""}</button>`).join("");
     $$("button", tabs).forEach((b) => b.onclick = () => { filter = b.dataset.k; sessionStorage.setItem("cf", filter); sig = ""; load(); });
     const nsig = JSON.stringify(clips.map((c) => [c.id, c.status, c.render_status, c.title]));
@@ -118,7 +140,7 @@ async function viewClips(v) {
       grid.append(card);
     }
     bar.hidden = !selMode; $("#selc").textContent = `${picked.length} clip${picked.length > 1 ? "s" : ""} sélectionné${picked.length > 1 ? "s" : ""}`;
-    $("#selm").textContent = selMode ? "Quitter la sélection" : "Sélectionner pour un résumé";
+    $("#selm").innerHTML = selMode ? `${ic("x")} Annuler` : `${ic("square-check")} Faire un résumé`;
   }
   v.append(bar);
   $("#selx").onclick = () => { selMode = false; picked.length = 0; sig = ""; load(); };
