@@ -91,8 +91,7 @@ async function viewClips(v) {
 
 function clipCard(c, reload) {
   const sc = c.detail?.viral ?? Math.round(100 * (1 - Math.exp(-Math.max(c.score, 0) / 2)));
-  const top = (c.detail?.signals || []).filter((x) => x.strong).slice(0, 2).map((x) => `${x.label.split(" (")[0]}${x.ratio ? ` ×${x.ratio}` : ""}`);
-  const why = [...top, ...(c.detail?.analysis?.reasons || []).slice(0, 1)].join(" · ");
+  const why = clipWhy(c);
   const cls = sc >= 70 ? "hi" : sc >= 40 ? "mid" : "lo";
   const rendering = ["rendering", "queued"].includes(c.render_status);
   const el = h(`<div class="clipc">
@@ -125,6 +124,14 @@ function clipCard(c, reload) {
   $$("[data-a]", el).forEach((b) => b.onclick = async () => { await api(`/api/clips/${c.id}/${b.dataset.a}`, { method: "POST" }); toast(b.dataset.a === "approve" ? "Clip approuvé ✅" : "Clip rejeté"); reload(); });
   return el;
 }
+function clipWhy(c) { // « pourquoi ce clip » en une phrase
+  const d = c.detail || {};
+  const sig = (d.signals || []).filter((x) => x.strong).slice(0, 2).map((x) => `${x.label.split(" (")[0]} ×${x.ratio ?? "+" + x.z}`);
+  if (c.origin === "import" && !sig.length && d.z?.audio) sig.push(`pic de son (+${d.z.audio}σ)`);
+  if (c.origin === "compilation") return `résumé de ${(d.compilation || []).length} moments`;
+  const txt = (d.analysis?.reasons || []).slice(0, 1);
+  return [...sig, ...txt].join(" · ");
+}
 async function compilationModal(opts, done) {
   const S = await api("/api/settings"), C = S.compilation;
   let ids = opts.clip_ids || [];
@@ -133,7 +140,8 @@ async function compilationModal(opts, done) {
   const m = h(`<div class="modal"><div class="card">
     <h2>🎬 ${opts.streamer ? `Résumé du live de ${esc(opts.streamer)}` : "Créer un résumé"}</h2>
     ${opts.streamer ? `<div class="grid2" style="gap:10px">
-        <label class="f"><b>Meilleurs moments des dernières</b><div class="inline"><input type="number" id="mh" value="${C.hours}" min="1"> h</div></label>
+        <label class="f"><b>Quels clips ?</b><select id="mpk"><option value="recent">Les derniers faits</option><option value="best">Les meilleurs scores</option></select></label>
+        <label class="f"><b>Sur les dernières</b><div class="inline"><input type="number" id="mh" value="${C.hours}" min="1"> h</div></label>
         <label class="f"><b>Nombre de moments</b><input type="number" id="mn" value="${C.clips}" min="2" max="20"></label></div>
         <button class="btn sm" id="mprev" style="margin-bottom:12px">🔎 Prévisualiser la sélection</button>` : ""}
     <div class="ord" id="mord"></div>
@@ -152,7 +160,9 @@ async function compilationModal(opts, done) {
     $("#mord", m).innerHTML = ids.length ? "" : `<div style="color:var(--mute)">Aucun clip.</div>`;
     ids.forEach((id, i) => {
       const c = byId[id] || {};
-      const row = h(`<div><b>${i + 1}</b>${c.thumb ? `<img src="/media/${id}/thumb">` : ""}<span>${esc(c.title || "#" + id)} · ${fmt(c.duration)}</span>
+      const why = clipWhy(c);
+      const row = h(`<div><b>${i + 1}</b>${c.thumb ? `<img src="/media/${id}/thumb">` : ""}<span class="ordt"><b>${esc(c.title || "#" + id)}</b> · ${fmt(c.duration)} · ${c.detail?.viral != null ? `score ${c.detail.viral}/100` : ""}
+        <small>${new Date(c.created * 1000).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })} — ${esc(why || "pas de détail (clip ancien)")}</small></span>
         <button class="btn sm" data-u ${i ? "" : "disabled"}>↑</button><button class="btn sm" data-d ${i < ids.length - 1 ? "" : "disabled"}>↓</button><button class="btn sm bad" data-r>✖</button></div>`);
       $("[data-u]", row).onclick = () => { [ids[i - 1], ids[i]] = [ids[i], ids[i - 1]]; drawOrd(); };
       $("[data-d]", row).onclick = () => { [ids[i + 1], ids[i]] = [ids[i], ids[i + 1]]; drawOrd(); };
@@ -163,10 +173,12 @@ async function compilationModal(opts, done) {
   const preview = () => {
     const since = Date.now() / 1000 - Number($("#mh", m).value) * 3600;
     const cand = all.filter((c) => c.streamer === opts.streamer && c.created >= since && c.status !== "rejected" && c.origin !== "compilation");
-    ids = cand.sort((a, b) => b.score - a.score).slice(0, Number($("#mn", m).value)).sort((a, b) => a.created - b.created).map((c) => c.id);
+    const vir = (c) => c.detail?.viral ?? c.score;
+    const pick = $("#mpk", m).value === "best" ? cand.sort((a, b) => vir(b) - vir(a)) : cand.sort((a, b) => b.created - a.created);
+    ids = pick.slice(0, Number($("#mn", m).value)).sort((a, b) => a.created - b.created).map((c) => c.id);
     drawOrd();
   };
-  if (opts.streamer) { $("#mprev", m).onclick = preview; preview(); } else drawOrd();
+  if (opts.streamer) { $("#mprev", m).onclick = preview; $("#mpk", m).onchange = preview; $("#mh", m).onchange = preview; $("#mn", m).onchange = preview; preview(); } else drawOrd();
   $("#mx", m).onclick = () => m.remove();
   m.onclick = (e) => { if (e.target === m) m.remove(); };
   $("#mgo", m).onclick = async () => {

@@ -242,10 +242,11 @@ def create_app(data_dir: Path | None = None, start_engine: bool = True) -> FastA
                           hours: float | None = Body(None), count: int | None = Body(None),
                           title: str = Body(""), transition: str | None = Body(None),
                           duration: float | None = Body(None), max_each: float | None = Body(None),
-                          effect: str = Body("none"), intro_text: bool = Body(True)):
+                          effect: str = Body("none"), intro_text: bool = Body(True),
+                          pick: str | None = Body(None)):
         c = eng.db.settings()["compilation"]
         if not clip_ids:  # résumé automatique : meilleurs moments récents
-            clip_ids = eng.best_clips(streamer, hours or c["hours"], count or c["clips"])
+            clip_ids = eng.best_clips(streamer, hours or c["hours"], count or c["clips"], pick or "recent")
         if len(clip_ids) < 2:
             raise HTTPException(400, "pas assez de clips (il en faut au moins 2)")
         tr = transition or c["transition"]

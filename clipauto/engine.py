@@ -324,11 +324,15 @@ class Engine:
             log.exception("compilation")
             self.db.update_job(jid, status="error", message=str(ex)[-300:])
 
-    def best_clips(self, streamer: str | None, hours: float, n: int) -> list[int]:
+    def best_clips(self, streamer: str | None, hours: float, n: int, mode: str = "recent") -> list[int]:
+        """`recent` = les N derniers clips faits ; `best` = les N meilleurs scores viraux."""
         since = time.time() - hours * 3600
         rows = [c for c in self.db.clips(limit=2000) if c["created"] >= since and c["status"] != "rejected"
                 and c["origin"] != "compilation" and (not streamer or c["streamer"] == streamer)]
-        best = sorted(rows, key=lambda c: -(c["score"] or 0))[:n]
+        if mode == "best":
+            best = sorted(rows, key=lambda c: -((c.get("detail") or {}).get("viral") or c["score"] or 0))[:n]
+        else:
+            best = sorted(rows, key=lambda c: -c["created"])[:n]
         return [c["id"] for c in sorted(best, key=lambda c: c["created"])]  # ordre chronologique
 
     # ---------- import (VOD Twitch/Kick/YouTube ou fichier)
