@@ -138,6 +138,7 @@ class Session:
             return "mot-clé" if kw else "rire" if la else "hype" if hy else ""
         trig.detail["chat"] = [{"t": round(t - trig.t, 1), "u": u, "m": m[:200], "tag": tag(m)} for t, u, m in msgs]
         trig.detail["chat_window"] = [round(lo - trig.t, 1), round(hi - trig.t, 1)]
+        trig.detail["stream"] = {"title": self.info.get("title"), "game": self.info.get("game")}
         name = f"{self.streamer.channel}_{int(trig.t)}"
         src = self.eng.data / "clips" / name / "source.mp4"
         try:
@@ -208,7 +209,9 @@ class Engine:
         t0, t1 = clipper.smart_trim(words, peak, total, c["min_seconds"], c["max_seconds"],
                                     c["pre_roll"], c["post_roll"], c["snap_to_sentences"])
         kept = [w for w in words if t0 <= w["s"] < t1 and not w.get("skip")]
-        title = auto_title(kept, streamer)
+        from .titles import suggest
+        title_opts = suggest(kept, streamer, detail, (detail.get("stream") or {}).get("game"))
+        title = title_opts[0] if title_opts else auto_title(kept, streamer)
         # ---- pourquoi ce clip : signaux + analyse du texte (+ juge IA optionnel, plafonné)
         settings = self.db.settings()
         analysis = virality.analyze_text(words, t0, t1, cfg["detect"]["keywords"])
@@ -221,7 +224,9 @@ class Engine:
         if llm and settings["ai"].get("use_title") and llm.get("title"):
             title = llm["title"]
         viral = virality.combine(sig, analysis["score"], llm["score"] if llm else None)
-        detail = {**detail, "analysis": analysis, "signals": virality.explain_signals(detail),
+        if llm and llm.get("title"):
+            title_opts = [llm["title"]] + [t for t in title_opts if t != llm["title"]]
+        detail = {**detail, "title_options": title_opts, "analysis": analysis, "signals": virality.explain_signals(detail),
                   "signal_score": sig, "llm": llm, "viral": viral, "peak_src": round(peak, 2)}
         layout = dict(cfg["layout"])
         if layout.get("mode") in ("split", "pip") and layout.get("auto_facecam", True):

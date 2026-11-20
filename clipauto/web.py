@@ -171,6 +171,16 @@ def create_app(data_dir: Path | None = None, start_engine: bool = True) -> FastA
         eng.db.update_clip(cid, words=words)
         return {"words": words}
 
+    @app.get("/api/clips/{cid}/titles")
+    def clip_titles(cid: int):
+        from .clipper import segments_of
+        from .titles import suggest
+        c = clip_or_404(cid)
+        segs = segments_of(c["edit"]) if c.get("edit") else []
+        kept = [w for w in c["words"] if any(g["s"] <= w["s"] < g["e"] for g in segs)] or c["words"]
+        d = c.get("detail") or {}
+        return suggest(kept, c["streamer"] or "", d, (d.get("stream") or {}).get("game"))
+
     @app.post("/api/clips/{cid}/facecam")
     async def detect_facecam(cid: int):
         from . import facecam
@@ -301,6 +311,25 @@ def create_app(data_dir: Path | None = None, start_engine: bool = True) -> FastA
         if p.is_file():
             p.unlink()
         return {"ok": True}
+
+    @app.get("/api/sounds/search")
+    async def sound_search(q: str, kind: str = "sfx", page: int = 1):
+        from . import sounds
+        try:
+            return await sounds.search(q[:80], kind, page)
+        except Exception as e:
+            raise HTTPException(502, str(e))
+
+    @app.post("/api/sounds/import")
+    async def sound_import(item: dict = Body(...)):
+        from . import sounds
+        if not str(item.get("url", "")).startswith("https://"):
+            raise HTTPException(400, "lien invalide")
+        try:
+            name = await sounds.download(item, assets)
+        except Exception as e:
+            raise HTTPException(502, f"téléchargement impossible : {e}")
+        return {"name": name, "kind": "audio"}
 
     @app.get("/api/emoji")
     def emoji(c: str):

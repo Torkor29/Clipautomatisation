@@ -338,6 +338,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             emit(1, nxt, le, x, y, f"\\c{_c(base_col)}{soft}{out_t}", txt)
             if glow:
                 emit(0, nxt, le, x, y, glow + out_t, txt)
+    hook_text = re.sub(r"\s+([!?:;»])", "\u00a0\\1", hook_text or "")  # jamais un « ! » seul sur une ligne
     if hook_text and hk.get("enabled", True):
         ev.append(f"Dialogue: 3,{_t(0)},{_t(float(hk.get('seconds', 3.5)))},Hook,,0,0,0,,"
                   f"{{\\fad(150,250)}}{_esc(hook_text)}")

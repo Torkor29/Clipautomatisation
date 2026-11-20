@@ -605,6 +605,16 @@ async function viewEditor(v, id) {
     </div></div>`);
   v.append(ed);
   $("#ttl").oninput = (e) => { E.title = e.target.value; mark(); };
+  const tsug = h(`<div class="tsug"><span>💡 Idées de titre :</span></div>`);
+  $("#ttl").closest(".row").after(tsug);
+  const showTitles = (list) => {
+    $$("button", tsug).forEach((b) => b.parentNode.removeChild(b));
+    for (const t of list) { const b = h(`<button class="chip">${esc(t)}</button>`); b.onclick = () => { E.title = t; $("#ttl").value = t; mark(); }; tsug.append(b); }
+    const r = h(`<button class="chip" title="Recalculer">🎲</button>`); r.onclick = async () => showTitles(await api(`/api/clips/${clip.id}/titles`)); tsug.append(r);
+    const n = h(`<button class="chip" title="Pas de titre">✖ aucun</button>`); n.onclick = () => { E.title = ""; $("#ttl").value = ""; mark(); }; tsug.append(n);
+  };
+  showTitles(clip.detail?.title_options || []);
+  if (!clip.detail?.title_options) api(`/api/clips/${clip.id}/titles`).then(showTitles).catch(() => { });
 
   /* ---- lecteurs vidéo (un maître avec le son + des copies muettes pour les calques) */
   const src = `/media/${clip.id}/source`;
@@ -741,7 +751,7 @@ async function viewEditor(v, id) {
     drawOverlays(k); tlPlayhead();
     const hk = E.hook, showH = hk.enabled && E.title && segAt(master.currentTime) >= 0 && outTime(master.currentTime) < hk.seconds;
     Object.assign(hookEl.style, { top: `${170 * k}px`, fontFamily: `'${st.font}'`, fontSize: `${(hk.size || 72) * k}px`, color: hk.color });
-    hookEl.innerHTML = showH ? `<span style="background:${hk.bg}">${esc(E.title)}</span>` : "";
+    hookEl.innerHTML = showH ? `<span style="background:${hk.bg}">${esc(E.title.replace(/\s+([!?:;»])/g, "\u00a0$1"))}</span>` : "";
     $("#tm").textContent = `${fmt(outTime(master.currentTime))} / ${fmt(outDur())}`;
     $$(".words .w").forEach((el) => { const w = words[el.dataset.i]; el.classList.toggle("cur", !!w && t >= w.s && t < w.e); });
     const tlph = $(".tl .ph"); if (tlph) tlph.style.left = `${(master.currentTime / dur) * 100}%`;
@@ -904,6 +914,7 @@ async function viewEditor(v, id) {
       <button class="btn sm" data-add="text">＋ Texte</button>
       <button class="btn sm" data-add="emoji">＋ Emoji</button>
       <button class="btn sm" data-add="media">＋ Image / vidéo / son</button>
+      <button class="btn sm" data-x="autosfx" title="Place des bruitages sur les transitions, les apparitions et le moment fort">✨ Bruitages auto</button>
       <div class="spacer"></div>
       <button class="btn sm" data-x="dup" title="Dupliquer">⧉</button>
       <button class="btn sm bad" data-x="del" title="Supprimer">🗑</button>
@@ -921,6 +932,31 @@ async function viewEditor(v, id) {
   });
   $('[data-x="del"]', tlx).onclick = () => { if (!selId) return toast("Sélectionne un calque"); E.overlays = E.overlays.filter((o) => o.id !== selId); selId = null; mark(); renderTL(); if (curTab === 4) showTab(4); };
   $('[data-x="dup"]', tlx).onclick = () => { const o = selItem(); if (!o) return toast("Sélectionne un calque"); const c = { ...deep(o), id: uid(), track: Math.max(...E.overlays.map((x) => x.track)) + 1 }; E.overlays.push(c); selId = c.id; mark(); renderTL(); };
+  $('[data-x="autosfx"]', tlx).onclick = () => {
+    const before = E.overlays.length;
+    E.overlays = E.overlays.filter((o) => !o.auto); // on remplace les bruitages auto précédents
+    const removed = before - E.overlays.length, D = outDur(), cues = [];
+    const TL = tline();
+    // 1) transitions entre passages : whoosh centré sur la transition
+    TL.forEach((g, i) => { if (i && (g.transition?.type || "cut") !== "cut") cues.push([Math.max(g.os - 0.15, 0), "whoosh", 60, "transition"]); });
+    // 2) apparition des calques visuels : pop (texte/emoji) ou swoosh (glissé)
+    for (const o of E.overlays) if (["text", "emoji", "image", "video"].includes(o.type) && o.anim_in && o.anim_in !== "none")
+      cues.push([o.start, /slide/.test(o.anim_in) ? "swoosh" : o.anim_in === "typewriter" ? "click" : "pop", 55, "apparition"]);
+    // 3) le moment fort détecté (pic du chat / du son) : impact
+    const pk = clip.detail?.peak_src;
+    if (pk != null && segAt(pk) >= 0) cues.push([Math.max(outTime(pk) - 0.05, 0), "hit-strong", 45, "moment fort"]);
+    // 4) titre d'accroche au début
+    if (E.title && E.hook?.enabled) cues.push([0, "swoosh", 45, "titre"]);
+    cues.sort((a, b) => a[0] - b[0]);
+    let last = -9, n = 0;
+    for (const [t, sfx, vol] of cues) {
+      if (t - last < 0.4 || t >= D) continue; last = t; n++;
+      const used = new Set(E.overlays.filter((x) => x.start < t + 1.2 && x.end > t).map((x) => x.track)); let track = 0; while (used.has(track)) track++;
+      E.overlays.push({ id: uid(), type: "audio", src: `sfx:${sfx}`, track, start: +t.toFixed(2), end: +Math.min(t + 1.2, D).toFixed(2), volume: vol, auto: true });
+    }
+    mark(); renderTL();
+    toast(n ? `✨ ${n} bruitage${n > 1 ? "s" : ""} placé${n > 1 ? "s" : ""} (transitions, apparitions, moment fort)${removed ? " — anciens remplacés" : ""}` : "Rien à sonoriser : ajoute des transitions ou des calques");
+  };
   $('[data-x="zoom"]', tlx).oninput = (e) => { tlZoom = Number(e.target.value); renderTL(); };
 
   function renderTL() {
@@ -995,7 +1031,12 @@ async function viewEditor(v, id) {
     const m = h(`<div class="modal"><div class="card" style="width:min(720px,100%)"><div class="row"><h2 style="margin:0">Médiathèque</h2><div class="spacer"></div><button class="btn sm" id="mlx">✖</button></div>
       <div class="drop" id="mld" style="margin:14px 0">⬆️ Dépose une image, une vidéo ou un son (logo, B-roll, musique…) ou clique<input type="file" hidden multiple accept="image/*,video/*,audio/*"></div>
       <h3>Tes médias</h3><div class="mlib" id="mll"></div>
-      <h3>Bruitages intégrés</h3><div class="mlib" id="mls"></div></div></div>`);
+      <h3>Bruitages intégrés</h3><div class="mlib" id="mls"></div>
+      <h3>🔎 Sons libres de droits (Openverse · Freesound…)</h3>
+      <div class="row"><input type="text" id="osq" placeholder="whoosh, punch, rire, applause, epic music…" style="flex:1;min-width:180px">
+        <select id="osk" style="width:auto"><option value="sfx">Bruitages</option><option value="music">Musiques</option></select><button class="btn pri" id="osg">Chercher</button></div>
+      <small style="color:var(--mute)">Uniquement CC0 (libre) et CC BY (créditer l'auteur — noté dans la médiathèque). Astuce : cherche en anglais.</small>
+      <div id="osr" class="osr"></div></div></div>`);
     document.body.append(m);
     const close = () => m.remove();
     $("#mlx", m).onclick = close; m.onclick = (e) => { if (e.target === m) close(); };
@@ -1003,7 +1044,11 @@ async function viewEditor(v, id) {
       close();
       if (a.kind === "image") cb({ type: "image", src: `asset:${a.name}`, x: .5, y: .3, w: .4, dur: 3 });
       else if (a.kind === "video") cb({ type: "video", src: `asset:${a.name}`, x: .5, y: .35, w: .7, trim_in: 0, volume: 80, dur: Math.min(a.duration || 5, 8) });
-      else cb({ type: "audio", src: a.sfx ? `sfx:${a.name}` : `asset:${a.name}`, volume: a.sfx ? 80 : 35, duck: !a.sfx, fade_in: a.sfx ? 0 : 0.5, fade_out: a.sfx ? 0 : 1, dur: a.sfx ? 1.5 : Math.min(a.duration || 999, outDur()) });
+      else {
+        const music = a.music || (!a.sfx && (a.duration || 0) > 12);
+        cb({ type: "audio", src: a.sfx ? `sfx:${a.name}` : `asset:${a.name}`, volume: music ? 30 : 80, duck: music, fade_in: music ? 0.5 : 0, fade_out: music ? 1 : 0,
+          dur: music ? outDur() : Math.min(a.duration || 1.5, 4) });
+      }
     };
     async function load() {
       const list = await api("/api/assets"), box = $("#mll", m);
@@ -1021,6 +1066,26 @@ async function viewEditor(v, id) {
       it.onclick = (e) => { if (e.target.closest("button")) { new Audio(`/sfx/${k}.mp3`).play(); return; } add({ kind: "audio", name: k, sfx: true }); };
       $("#mls", m).append(it);
     }
+    let player = null;
+    const osearch = async () => {
+      const q = $("#osq", m).value.trim(); if (!q) return;
+      const box = $("#osr", m); box.innerHTML = `<div style="color:var(--mute);padding:10px">Recherche…</div>`;
+      try {
+        const res = await api(`/api/sounds/search?q=${encodeURIComponent(q)}&kind=${$("#osk", m).value}`);
+        box.innerHTML = res.length ? "" : `<div style="color:var(--mute);padding:10px">Aucun son trouvé (essaie en anglais).</div>`;
+        for (const r of res) {
+          const it = h(`<div class="osi"><button class="btn sm" data-p>▶︎</button><div><b>${esc(r.title)}</b><small>${fmt(r.duration)} · ${r.license.toUpperCase()} · ${esc(r.creator)} · ${esc(r.source || "")}</small></div><button class="btn sm pri" data-a>＋ Ajouter</button></div>`);
+          $("[data-p]", it).onclick = () => { if (player) player.pause(); player = new Audio(r.url); player.play(); };
+          $("[data-a]", it).onclick = async (e) => {
+            e.target.disabled = true; e.target.textContent = "⏳";
+            try { const a = await api("/api/sounds/import", { method: "POST", json: r }); if (player) player.pause(); add({ kind: "audio", name: a.name, duration: r.duration, music: $("#osk", m).value === "music" }); }
+            catch (er) { toast(er.message); e.target.disabled = false; e.target.textContent = "＋ Ajouter"; }
+          };
+          box.append(it);
+        }
+      } catch (er) { box.innerHTML = `<div style="color:var(--bad);padding:10px">${esc(er.message)}</div>`; }
+    };
+    $("#osg", m).onclick = osearch; $("#osq", m).onkeydown = (e) => e.key === "Enter" && osearch();
     const dz = $("#mld", m), fi = $("input", dz);
     const up = async (files) => { for (const f of files) { const fd = new FormData(); fd.append("file", f); try { await api("/api/assets", { method: "POST", body: fd }); } catch (e) { toast(e.message); } } load(); };
     dz.onclick = () => fi.click(); fi.onchange = () => up(fi.files);
