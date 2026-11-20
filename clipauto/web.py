@@ -48,7 +48,7 @@ def create_app(data_dir: Path | None = None, start_engine: bool = True) -> FastA
 
     app = FastAPI(title="ClipAuto", lifespan=lifespan)
     app.state.engine = eng
-    password = os.environ.get("APP_PASSWORD")
+    password = (os.environ.get("APP_PASSWORD") or "").strip().strip("\"'") or None  # tolère espaces / guillemets
 
     # front sur Vercel → appels depuis une autre origine (CORS). L'accès est protégé par le jeton.
     from fastapi.middleware.cors import CORSMiddleware
