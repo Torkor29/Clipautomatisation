@@ -200,8 +200,10 @@ class Engine:
 
     # ---------- clips
     async def new_clip(self, src: Path, peak: float, streamer: str, platform: str, score: float,
-                       detail: dict, cfg: dict, origin: str) -> int:
+                       detail: dict, cfg: dict, origin: str, progress=None) -> int:
         c = cfg["clip"]
+        say = progress or (lambda m: None)
+        say("transcription de la voix (l'étape la plus longue)…")
         async with self.cpu:
             words = await asyncio.to_thread(clipper.transcribe, src, c["whisper_model"], c["language"],
                                             c.get("streamer_only", True))
@@ -247,6 +249,7 @@ class Engine:
             log.info("clip #%s écarté (score %s < %s)", cid, viral, min_v)
             return cid
         z = detail.get("z", {})
+        say("rendu vidéo 9:16…")
         if c.get("auto_render", True):
             await self.render_clip(cid)
         clip = self.db.clip(cid)
@@ -361,8 +364,10 @@ class Engine:
                 pre = max(c["pre_roll"], c["max_seconds"])
                 dst = self.data / "clips" / f"import{jid}_{int(t)}" / "source.mp4"
                 await clipper.cut_file(path, t - pre, t + c["post_roll"] + 5, dst)
+                lbl = f"clip {i + 1}/{len(peaks)}"
                 await self.new_clip(dst, peak=min(pre, t), streamer=opts.get("streamer", ""),
-                                    platform="import", score=score, detail={"z": z}, cfg=cfg, origin="import")
+                                    platform="import", score=score, detail={"z": z}, cfg=cfg, origin="import",
+                                    progress=lambda m, lbl=lbl: self.db.update_job(jid, message=f"{lbl} : {m}"))
             self.db.update_job(jid, status="done", progress=1, message=f"{len(peaks)} clips créés")
         except Exception as ex:
             log.exception("import")

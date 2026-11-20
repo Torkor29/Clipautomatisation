@@ -341,10 +341,10 @@ async function viewImport(v) {
   let file = null;
   const dz = $("#dz", f), fi = $("#if", f);
   dz.onclick = () => fi.click();
-  fi.onchange = () => { file = fi.files[0]; dz.textContent = file ? `${ic("folder")} ${file.name}` : dz.textContent; };
+  fi.onchange = () => { file = fi.files[0]; if (file) dz.innerHTML = `${ic("folder")} ${esc(file.name)}`; };
   dz.ondragover = (e) => { e.preventDefault(); dz.classList.add("on"); };
   dz.ondragleave = () => dz.classList.remove("on");
-  dz.ondrop = (e) => { e.preventDefault(); dz.classList.remove("on"); file = e.dataTransfer.files[0]; dz.textContent = `${ic("folder")} ${file.name}`; };
+  dz.ondrop = (e) => { e.preventDefault(); dz.classList.remove("on"); file = e.dataTransfer.files[0]; dz.innerHTML = `${ic("folder")} ${esc(file.name)}`; };
   $("#ig", f).onclick = async () => {
     const fd = new FormData();
     const url = $("#iu", f).value.trim();
@@ -362,7 +362,7 @@ async function viewImport(v) {
     const js = await api("/api/jobs");
     $("#jl", jobs).innerHTML = js.length ? js.map((j) => `<div class="job"><div class="row"><b style="overflow:hidden;text-overflow:ellipsis;max-width:70%">${esc(j.label)}</b><div class="spacer"></div>
       <span class="pill ${j.status === "error" ? "error" : j.status === "done" ? "published" : "pending"}">${j.status === "running" ? "en cours" : j.status === "done" ? "terminé" : "erreur"}</span></div>
-      <div class="bar"><div style="width:${Math.round((j.progress || 0) * 100)}%"></div></div><small style="color:var(--mute)">${esc(j.message || "")}</small></div>`).join("")
+      <div class="bar"><div style="width:${Math.round((j.progress || 0) * 100)}%"></div></div><small style="color:var(--mute)">${esc(j.message || "")}${j.status === "running" ? ` · ${fmt(Date.now() / 1000 - j.created)} écoulées` : ""}</small></div>`).join("")
       : `<div style="color:var(--mute)">Aucun import.</div>`;
   }, 3000);
 }
