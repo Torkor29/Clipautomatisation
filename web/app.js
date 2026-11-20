@@ -55,6 +55,8 @@ function toast(msg, ms = 2600) {
   const d = h(`<div>${esc(msg)}</div>`); $("#toast").append(d); setTimeout(() => d.remove(), ms);
 }
 let META = null, timers = [];
+window.addEventListener("error", (e) => toast(`Erreur : ${e.message}`, 6000));
+window.addEventListener("unhandledrejection", (e) => toast(`Erreur : ${e.reason?.message || e.reason}`, 6000));
 function every(fn, ms) { fn(); timers.push(setInterval(fn, ms)); }
 function clearTimers() { timers.forEach(clearInterval); timers = []; }
 
@@ -653,11 +655,11 @@ async function viewEditor(v, id) {
 
   /* ---- lecteurs vidéo (un maître avec le son + des copies muettes pour les calques) */
   const src = `${MB}/media/${clip.id}/source`;
-  const master = h(`<video preload="auto" playsinline src="${src}"></video>`);
+  const master = h(`<video preload="auto" playsinline webkit-playsinline src="${src}"></video>`);
   master.style.display = "none"; ed.append(master);
   let iw = 1920, ih = 1080, dur = 1;
   const ph = $("#ph"), copies = [];
-  const mk = () => { const x = h(`<video muted playsinline preload="auto" src="${src}"></video>`); copies.push(x); return x; };
+  const mk = () => { const x = h(`<video muted playsinline webkit-playsinline preload="auto" src="${src}#t=${(E.trim?.[0] || 0).toFixed(2)}"></video>`); x.muted = true; copies.push(x); try { x.load(); } catch { } return x; };
   const capEl = h(`<div class="capw"></div>`), hookEl = h(`<div class="hookl"></div>`);
 
   function buildStage() {
@@ -1182,7 +1184,19 @@ async function viewEditor(v, id) {
     $('[data-b="del"]', pb).onclick = () => $('[data-x="del"]', tlx).click();
   }
 
-  master.addEventListener("loadedmetadata", () => { iw = master.videoWidth; ih = master.videoHeight; dur = master.duration; master.playbackRate = E.speed; seek(E.trim[0]); buildStage(); showTab(0); renderTL(); });
+  let ready = false;
+  const init = (real) => {
+    if (real) { iw = master.videoWidth || iw; ih = master.videoHeight || ih; dur = master.duration || dur; }
+    if (ready && !real) return;
+    const first = !ready; ready = true;
+    master.playbackRate = E.speed;
+    if (first) seek(E.trim[0]);
+    buildStage(); if (first) showTab(0); renderTL();
+  };
+  master.addEventListener("loadedmetadata", () => init(true));
+  dur = Math.max(...E.segments.map((g) => g.e), E.trim[1], clip.duration || 1) + 1;
+  setTimeout(() => init(false), 2500);
+  master.load();
   loop();
 
   /* ---- onglets */
@@ -1527,8 +1541,12 @@ async function viewEditor(v, id) {
     await api(`/api/clips/${clip.id}`, { method: "PATCH", json: { edit: E, words, title: E.title } });
     dirty = false; $("#dirty").hidden = true;
   }
-  $("#save").onclick = async () => { await saveEdit(); toast("Enregistré"); };
-  $("#rend").onclick = async () => { await saveEdit(); await api(`/api/clips/${clip.id}/render`, { method: "POST" }); toast("Rendu lancé"); pollRender(); };
+  const busy = async (btn, label, fn) => {
+    const old = btn.innerHTML; btn.disabled = true; btn.innerHTML = `${ic("loader", "spin")} ${label}`;
+    try { await fn(); } catch (e) { toast(`Échec : ${e.message}`, 6000); } finally { btn.disabled = false; btn.innerHTML = old; }
+  };
+  $("#save").onclick = () => busy($("#save"), "Enregistrement…", async () => { await saveEdit(); toast("Enregistré"); });
+  $("#rend").onclick = () => busy($("#rend"), "Envoi…", async () => { await saveEdit(); await api(`/api/clips/${clip.id}/render`, { method: "POST" }); toast("Rendu lancé — 1 à 3 min"); pollRender(); });
   async function pollRender() {
     const c = await api(`/api/clips/${clip.id}`);
     const ob = $("#outbar"); if (!ob) return;
