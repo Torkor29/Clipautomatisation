@@ -25,19 +25,31 @@ async function api(path, opts = {}) {
   return r.status === 204 ? null : r.json();
 }
 function showLogin() {
+  // Page de connexion « simple » : vrai <form>, aucun flou / animation / transformation autour du champ
+  // (sur iPhone, un champ dans un conteneur avec backdrop-filter ou animation peut ne rien afficher).
   if ($("#login")) return;
-  const m = h(`<div class="modal" id="login"><div class="card" style="width:min(380px,100%)"><div class="brand" style="padding:0 0 14px"><span class="logo">${ic("play")}</span> ClipAuto</div>
-    <label class="f"><b>Mot de passe</b><input type="password" id="lpw" autocomplete="current-password"></label>
-    <button class="btn pri" id="lgo" style="width:100%;justify-content:center">Se connecter</button>
-    <small style="color:var(--mute);display:block;margin-top:10px">${API ? `Serveur : ${esc(API)}` : ""}</small></div></div>`);
+  document.body.classList.add("is-login");
+  const m = h(`<form class="login" id="login" autocomplete="on">
+    <div class="login-box">
+      <div class="brand"><span class="logo">${ic("play")}</span> ClipAuto</div>
+      <label class="f" for="lpw"><b>Mot de passe</b></label>
+      <input type="password" id="lpw" name="password" autocomplete="current-password" autocapitalize="off" autocorrect="off" spellcheck="false" required>
+      <label class="inline lshow"><input type="checkbox" id="lsh"> Afficher le mot de passe</label>
+      <button class="btn pri" type="submit">Se connecter</button>
+      <p class="lerr" id="lerr" hidden></p>
+      ${API ? `<small>Serveur : ${esc(API)}</small>` : ""}
+    </div></form>`);
   document.body.append(m);
-  const go = async () => {
-    const pw = $("#lpw", m).value;
-    const r = await fetch(API + "/api/meta", { headers: { Authorization: `Bearer ${pw}` } }).catch(() => null);
-    if (r && r.ok) { try { localStorage.setItem("clipauto_token", pw); } catch { } location.reload(); }
-    else toast(r ? "Mot de passe incorrect" : "Serveur injoignable");
+  const pw = $("#lpw", m);
+  $("#lsh", m).onchange = (e) => { pw.type = e.target.checked ? "text" : "password"; };
+  m.onsubmit = async (e) => {
+    e.preventDefault();
+    const val = pw.value.trim(), err = $("#lerr", m);
+    if (!val) { err.hidden = false; err.textContent = "Tape ton mot de passe."; return; }
+    const r = await fetch(API + "/api/meta", { headers: { Authorization: `Bearer ${val}` } }).catch(() => null);
+    if (r && r.ok) { try { localStorage.setItem("clipauto_token", val); } catch { } location.reload(); }
+    else { err.hidden = false; err.textContent = r ? `Mot de passe incorrect (${val.length} caractères envoyés).` : "Serveur injoignable."; }
   };
-  $("#lgo", m).onclick = go; $("#lpw", m).onkeydown = (e) => e.key === "Enter" && go(); $("#lpw", m).focus();
 }
 function toast(msg, ms = 2600) {
   const d = h(`<div>${esc(msg)}</div>`); $("#toast").append(d); setTimeout(() => d.remove(), ms);

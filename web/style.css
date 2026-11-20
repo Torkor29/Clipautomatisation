@@ -265,7 +265,7 @@ label.f small{font-size:12px;color:var(--mute);line-height:1.4}
 .ovlist{display:grid;gap:6px}.ovlist .btn{justify-content:flex-start}
 
 /* fenêtres (feuilles en bas sur mobile) */
-.modal{position:fixed;inset:0;background:#000000b3;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);display:grid;place-items:center;z-index:50;padding:16px;animation:fade .15s}
+.modal{position:fixed;inset:0;background:#000000c7;display:grid;place-items:center;z-index:50;padding:16px;animation:fade .15s}
 .modal .card{width:min(560px,100%);max-height:88vh;max-height:88dvh;overflow:auto;box-shadow:0 24px 64px #000;animation:pop .18s ease-out}
 @keyframes fade{from{opacity:0}}
 @keyframes pop{from{opacity:0;transform:translateY(8px) scale(.98)}}
@@ -365,3 +365,15 @@ label.f small{font-size:12px;color:var(--mute);line-height:1.4}
   main>.row:first-child{margin-bottom:14px;gap:8px}
   main>.row:first-child .sub{margin-bottom:4px}
 }
+
+/* page de connexion : volontairement sans effet (fiabilité de la saisie sur iPhone) */
+body.is-login>*:not(#login):not(script){display:none!important}
+.login{min-height:100vh;min-height:100dvh;width:100%;display:flex;align-items:center;justify-content:center;padding:24px 20px calc(24px + var(--safe-b))}
+.login-box{width:100%;max-width:360px;display:grid;gap:12px}
+.login-box .brand{padding:0 0 12px;font-size:17px}
+.login-box label.f{margin:0}
+.login-box input[type=password],.login-box input[type=text]{height:48px;font-size:17px;background:var(--s2)}
+.login-box .btn{height:48px;font-size:15px;width:100%}
+.login-box .lshow{color:var(--mute);font-size:13px}
+.login-box small{color:var(--faint);font-size:12px;word-break:break-all}
+.lerr{margin:0;color:var(--red);font-size:13px}
