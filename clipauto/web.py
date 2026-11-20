@@ -91,7 +91,7 @@ def create_app(data_dir: Path | None = None, start_engine: bool = True) -> FastA
         return {"fonts": list(FONTS), "presets": PRESETS, "defaults": DEFAULT_SETTINGS, "platforms": PLATFORMS,
                 "transitions": TRANSITIONS, "effects": EFFECTS, "caption_base": BASE,
                 "font_ratio": {f: em_ratio(f) for f in FONTS}, "word_anims": WORD_ANIMS,
-                "line_anims": LINE_ANIMS, "sfx": SFX}
+                "line_anims": LINE_ANIMS, "sfx": SFX, "ovl_anims": ovl.ANIM_IN}
 
     # ------------------------------------------------------------ réglages
     @app.get("/api/settings")
@@ -257,6 +257,56 @@ def create_app(data_dir: Path | None = None, start_engine: bool = True) -> FastA
                                  max_each if max_each is not None else c["max_each"], effect, intro_text))
         return {"job": jid, "clips": clip_ids}
 
+    # ------------------------------------------------------------ médias (calques de la timeline)
+    from . import overlays as ovl
+    assets = data / "assets"
+    assets.mkdir(parents=True, exist_ok=True)
+
+    @app.get("/api/assets")
+    async def list_assets():
+        from . import clipper
+        out = []
+        for p in sorted(assets.iterdir(), key=lambda x: -x.stat().st_mtime):
+            kind = ovl.asset_kind(p.name)
+            if not p.is_file() or not kind:
+                continue
+            dur = None
+            if kind in ("video", "audio"):
+                try:
+                    dur = await clipper.probe_duration(p)
+                except Exception:
+                    dur = None
+            out.append({"name": p.name, "kind": kind, "size": p.stat().st_size, "duration": dur})
+        return out
+
+    @app.post("/api/assets")
+    async def upload_asset(file: UploadFile = File(...)):
+        import re as _re
+        name = _re.sub(r"[^\w.\-]", "_", Path(file.filename or "media").name)[-80:]
+        if not ovl.asset_kind(name):
+            raise HTTPException(400, "format non pris en charge (image, vidéo ou son)")
+        dst = assets / name
+        i = 1
+        while dst.exists():
+            dst = assets / f"{Path(name).stem}_{i}{Path(name).suffix}"
+            i += 1
+        with dst.open("wb") as f:
+            shutil.copyfileobj(file.file, f)
+        return {"name": dst.name, "kind": ovl.asset_kind(dst.name)}
+
+    @app.delete("/api/assets/{name}")
+    def delete_asset(name: str):
+        p = assets / Path(name).name
+        if p.is_file():
+            p.unlink()
+        return {"ok": True}
+
+    @app.get("/api/emoji")
+    def emoji(c: str):
+        if not c or len(c) > 16:
+            raise HTTPException(400)
+        return FileResponse(ovl.emoji_png(c, data), media_type="image/png")
+
     @app.get("/api/jobs")
     def jobs():
         return eng.db.jobs()
@@ -267,5 +317,6 @@ def create_app(data_dir: Path | None = None, start_engine: bool = True) -> FastA
 
     app.mount("/fonts", StaticFiles(directory=ROOT / "fonts"), name="fonts")
     app.mount("/sfx", StaticFiles(directory=ROOT / "sfx"), name="sfx")
+    app.mount("/assets", StaticFiles(directory=data / "assets"), name="assets")
     app.mount("/", StaticFiles(directory=ROOT / "web", html=True), name="web")
     return app

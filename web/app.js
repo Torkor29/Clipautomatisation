@@ -561,7 +561,11 @@ async function viewEditor(v, id) {
   let reordered = E.segments.some((g, i) => i && g.s < E.segments[i - 1].s);
   const syncTrim = () => { if (!reordered) E.segments.sort((a, b) => a.s - b.s); E.trim = [Math.min(...E.segments.map((g) => g.s)), Math.max(...E.segments.map((g) => g.e))]; };
   let dirty = false, shift = 0;
-  const mark = () => { dirty = true; $("#dirty").hidden = false; draw(); };
+  let tlTimer = null, tlBusy = false;
+  const mark = () => {
+    dirty = true; $("#dirty").hidden = false; draw();
+    if (!tlBusy && typeof renderTL === "function") { clearTimeout(tlTimer); tlTimer = setTimeout(() => { if (!tlBusy) renderTL(); }, 250); }
+  };
 
   v.append(h(`<div class="row" style="margin-bottom:16px">
     <a class="btn sm" href="#/clips">← Clips</a>
@@ -584,7 +588,7 @@ async function viewEditor(v, id) {
       <div class="savebar" id="outbar"></div>
     </div>
     <div class="panel">
-      <div class="ptabs">${["✂️ Montage", "Sous-titres", "Style", "Cadrage", "🔍 Pourquoi ?", "Publier"].map((t, i) => `<button data-t="${i}" class="${i ? "" : "on"}">${t}</button>`).join("")}</div>
+      <div class="ptabs">${["✂️ Montage", "Sous-titres", "Style", "Cadrage", "🧩 Calques", "🔍 Pourquoi ?", "Publier"].map((t, i) => `<button data-t="${i}" class="${i ? "" : "on"}">${t}</button>`).join("")}</div>
       <div class="pbody" id="pb"></div>
     </div></div>`);
   v.append(ed);
@@ -634,7 +638,8 @@ async function viewEditor(v, id) {
       const fg = mk(); const fw = W * (L.mode === "blur" ? (L.zoom || 1) : 1), fh = fw * ih / iw;
       Object.assign(fg.style, { width: `${fw}px`, height: `${fh}px`, left: `${(W - fw) / 2}px`, top: `${(H - fh) / 2}px` }); b.append(fg);
     }
-    ph.append(fx, capEl, hookEl); capEl.style.zIndex = hookEl.style.zIndex = 3; capKey = "";
+    ph.append(fx, ovlEl, capEl, hookEl); capEl.style.zIndex = hookEl.style.zIndex = 3; ovlEl.style.zIndex = 4; capKey = "";
+    ovlNodes.forEach((n) => n.el.remove()); ovlNodes.clear();
     copies.forEach((c) => { c.currentTime = master.currentTime; });
     draw();
   }
@@ -721,6 +726,7 @@ async function viewEditor(v, id) {
   function draw() {
     const st = E.style, k = ph.clientWidth / 1080, t = master.currentTime - shift;
     drawCaptions(t, k);
+    drawOverlays(k); tlPlayhead();
     const hk = E.hook, showH = hk.enabled && E.title && segAt(master.currentTime) >= 0 && outTime(master.currentTime) < hk.seconds;
     Object.assign(hookEl.style, { top: `${170 * k}px`, fontFamily: `'${st.font}'`, fontSize: `${(hk.size || 72) * k}px`, color: hk.color });
     hookEl.innerHTML = showH ? `<span style="background:${hk.bg}">${esc(E.title)}</span>` : "";
@@ -769,7 +775,302 @@ async function viewEditor(v, id) {
   const ro = new ResizeObserver(() => buildStage()); ro.observe(ph);
   window._edCleanup = () => { cancelAnimationFrame(raf); ro.disconnect(); master.pause(); window.onbeforeunload = null; };
   window.onbeforeunload = () => dirty ? "" : undefined;
-  master.addEventListener("loadedmetadata", () => { iw = master.videoWidth; ih = master.videoHeight; dur = master.duration; master.playbackRate = E.speed; seek(E.trim[0]); buildStage(); showTab(0); });
+  /* =================================================================== TIMELINE MULTI-PISTES
+     Calques (textes, emojis, images, vidéos, sons) posés sur le temps de la vidéo FINALE. */
+  E.overlays = E.overlays || [];
+  let selId = null, tlZoom = 1;
+  const OCOL = { text: "#a855f7", emoji: "#f59e0b", image: "#22c55e", video: "#3b82f6", audio: "#ef4444" };
+  const OICO = { text: "T", emoji: "😀", image: "🖼", video: "🎬", audio: "🎵" };
+  const uid = () => Math.random().toString(36).slice(2, 9);
+  const srcOf = (T) => { // temps final → temps source (inverse de outTime)
+    const TL = tline(); let g = TL[0];
+    for (const x of TL) if (T >= x.os) g = x;
+    return g ? g.s + clamp(T - g.os, 0, g.od) * segSpeed(g) : 0;
+  };
+  const seekOut = (T) => { const s0 = srcOf(clamp(T, 0, outDur() - 0.01)); curSeg = Math.max(segAt(s0), 0); seek(s0); };
+  const selItem = () => E.overlays.find((o) => o.id === selId);
+  const ovlLabel = (o) => o.type === "text" ? (o.text || "Texte") : o.type === "emoji" ? o.emoji : (o.src || "").replace(/^(asset|sfx):/, "");
+
+  function addOverlay(o) {
+    const T = outTime(master.currentTime), D = outDur();
+    const dur = o.dur || 3; delete o.dur;
+    const used = new Set(E.overlays.filter((x) => x.start < T + dur && x.end > T).map((x) => x.track));
+    let track = 0; while (used.has(track)) track++;
+    const it = { id: uid(), track, start: +Math.min(T, Math.max(D - 0.5, 0)).toFixed(2), anim_in: "pop", anim_out: "fade", ...o };
+    it.end = +Math.min(it.start + dur, D).toFixed(2);
+    E.overlays.push(it); selId = it.id; mark(); renderTL(); showTab(4);
+  }
+
+  /* ---------- aperçu des calques sur le téléphone */
+  const ovlEl = h(`<div class="ovl"></div>`);
+  const ovlNodes = new Map();
+  function ovlNode(o, k) {
+    let n = ovlNodes.get(o.id);
+    const { x, y, w, size, opacity, rotation, start, end, track, ...rest } = o; // ceux-là sont appliqués à chaque image
+    const sig = JSON.stringify([rest, k]);
+    if (n && n.sig === sig) return n;
+    if (n) n.el.remove();
+    let el;
+    if (o.type === "text") {
+      const ratio = META.font_ratio[o.font] || .64, px = 80 * ratio * k;
+      el = h(`<div class="ot"><span>${esc(o.uppercase ? (o.text || "").toUpperCase() : o.text || "").replace(/\n/g, "<br>")}</span></div>`);
+      Object.assign($("span", el).style, { fontFamily: `'${o.font || "Montserrat Black"}'`, fontSize: `${px}px`, color: o.color || "#fff",
+        WebkitTextStroke: o.outline ? `${o.outline * 2 * k}px ${o.outline_color || "#000"}` : "0", textShadow: o.shadow ? `${o.shadow * k}px ${o.shadow * k}px ${2 * k}px #000a` : "none",
+        background: o.bg ? o.bg + Math.round((o.bg_opacity ?? 100) * 2.55).toString(16).padStart(2, "0") : "transparent", padding: o.bg ? `${px * .3}px ${px * .35}px` : "0", borderRadius: `${px * .3}px` });
+    } else if (o.type === "video") {
+      el = h(`<div class="om"><video playsinline preload="auto" src="/assets/${encodeURIComponent(o.src.slice(6))}"></video></div>`);
+      $("video", el).muted = !!o.muted; $("video", el).volume = clamp((o.volume ?? 100) / 100, 0, 1);
+    } else if (o.type === "audio") {
+      el = h(`<div class="oa" hidden><audio preload="auto" src="${o.src.startsWith("sfx:") ? `/sfx/${o.src.slice(4)}.mp3` : `/assets/${encodeURIComponent(o.src.slice(6))}`}"></audio></div>`);
+      $("audio", el).volume = clamp((o.volume ?? 100) / 100, 0, 1);
+    } else {
+      const url = o.type === "emoji" ? `/api/emoji?c=${encodeURIComponent(o.emoji || "😂")}` : `/assets/${encodeURIComponent(o.src.slice(6))}`;
+      el = h(`<div class="om"><img draggable="false" src="${url}"></div>`);
+    }
+    if (o.type !== "audio") {
+      el.append(h(`<div class="rz" title="Redimensionner"></div>`));
+      bindDrag(el, o);
+    }
+    n = { el, sig, active: false }; ovlNodes.set(o.id, n); ovlEl.append(el);
+    return n;
+  }
+  function bindDrag(el, o) {
+    el.onpointerdown = (e) => {
+      e.preventDefault(); e.stopPropagation(); selId = o.id; renderTL(); if (curTab !== 4) showTab(4); else renderProps();
+      const r = ph.getBoundingClientRect(), resize = e.target.classList.contains("rz"), x0 = e.clientX, y0 = e.clientY;
+      const st = { x: o.x ?? .5, y: o.y ?? .5, w: o.w ?? .4, size: o.size || 80 };
+      el.setPointerCapture(e.pointerId); tlBusy = true;
+      el.onpointermove = (ev) => {
+        const dx = (ev.clientX - x0) / r.width, dy = (ev.clientY - y0) / r.height;
+        if (resize) { if (o.type === "text") o.size = Math.round(clamp(st.size * (1 + dx * 2.5), 20, 260)); else o.w = +clamp(st.w + dx * 2, .05, 1.2).toFixed(3); }
+        else { o.x = +clamp(st.x + dx, 0, 1).toFixed(3); o.y = +clamp(st.y + dy, 0, 1).toFixed(3); }
+        mark();
+      };
+      el.onpointerup = () => { el.onpointermove = null; tlBusy = false; renderProps(); };
+    };
+  }
+  const ANIM = {
+    pop: [{ transform: "translate(-50%,-50%) scale(.4)", opacity: 0 }, { transform: "translate(-50%,-50%) scale(1.12)", opacity: 1, offset: .6 }, { transform: "translate(-50%,-50%) scale(1)" }],
+    fade: [{ opacity: 0 }, { opacity: 1 }],
+    slide_up: [{ transform: "translate(-50%,0%)", opacity: 0 }, { transform: "translate(-50%,-50%)", opacity: 1 }],
+    slide_left: [{ transform: "translate(40%,-50%)", opacity: 0 }, { transform: "translate(-50%,-50%)", opacity: 1 }],
+    typewriter: [{ clipPath: "inset(0 100% 0 0)" }, { clipPath: "inset(0 0 0 0)" }],
+  };
+  function drawOverlays(k) {
+    const T = segAt(master.currentTime) >= 0 ? outTime(master.currentTime) : -1, playing = !master.paused;
+    const ids = new Set(E.overlays.map((o) => o.id));
+    for (const [id, n] of ovlNodes) if (!ids.has(id)) { n.el.remove(); ovlNodes.delete(id); }
+    for (const o of E.overlays) {
+      const n = ovlNode(o, k), on = T >= o.start && T < o.end;
+      if (o.type !== "audio") { // position / taille appliquées à chaque image (glisser fluide)
+        const es = n.el.style;
+        es.left = `${(o.x ?? .5) * 100}%`; es.top = `${(o.y ?? .5) * 100}%`; es.opacity = (o.opacity ?? 100) / 100;
+        es.zIndex = o.type === "text" ? 20 + (o.track || 0) : 10 + (o.track || 0);
+        if (!n.el.getAnimations().length) es.transform = `translate(-50%,-50%) rotate(${o.rotation || 0}deg)`;
+        if (o.type === "text") { const sp = n.el.firstElementChild, f = (o.size || 80) / 80; sp.style.fontSize = `${(META.font_ratio[o.font] || .64) * (o.size || 80) * k}px`; sp.style.padding = o.bg ? `${.3 * f * 80 * (META.font_ratio[o.font] || .64) * k}px ${.35 * f * 80 * (META.font_ratio[o.font] || .64) * k}px` : "0"; }
+        else es.width = `${(o.w ?? .4) * 100}%`;
+      }
+      n.el.classList.toggle("sel", o.id === selId);
+      if (o.type !== "audio") n.el.style.display = on ? "" : "none";
+      if (on && !n.active && o.anim_in && ANIM[o.anim_in]) n.el.animate(ANIM[o.anim_in], { duration: o.anim_in === "typewriter" ? Math.min(1200, (o.end - o.start) * 400) : 260, easing: "ease-out" });
+      n.active = on;
+      const m = $("video,audio", n.el);
+      if (m) {
+        if (on) {
+          const want = (o.trim_in || 0) + (T - o.start);
+          if (Math.abs(m.currentTime - want) > 0.3) m.currentTime = want;
+          if (playing && m.paused) m.play().catch(() => { }); else if (!playing && !m.paused) m.pause();
+        } else if (!m.paused) m.pause();
+      }
+    }
+  }
+
+  /* ---------- la timeline */
+  const tlx = h(`<div class="tlx card">
+    <div class="row tlbar">
+      <b>🎞️ Timeline</b>
+      <button class="btn sm" data-add="text">＋ Texte</button>
+      <button class="btn sm" data-add="emoji">＋ Emoji</button>
+      <button class="btn sm" data-add="media">＋ Image / vidéo / son</button>
+      <div class="spacer"></div>
+      <button class="btn sm" data-x="dup" title="Dupliquer">⧉</button>
+      <button class="btn sm bad" data-x="del" title="Supprimer">🗑</button>
+      <label class="inline" style="font-size:12px;color:var(--mute)">zoom <input type="range" min="1" max="6" step="0.5" value="1" data-x="zoom" style="width:90px"></label>
+    </div>
+    <div class="tlscroll"><div class="tlin"><div class="ruler"></div><div class="rows"></div><div class="tph"></div></div></div>
+    <small style="color:var(--mute)">Glisse un calque pour le déplacer (aussi entre les pistes), tire ses bords pour changer sa durée. Sur l'aperçu : déplace-le, coin = taille.</small>
+  </div>`);
+  v.append(tlx);
+  $$("[data-add]", tlx).forEach((b) => b.onclick = () => {
+    const t = b.dataset.add;
+    if (t === "text") addOverlay({ type: "text", text: "TON TEXTE", x: .5, y: .2, size: 90, font: "Montserrat Black", color: "#FFFFFF", outline: 6, outline_color: "#000000", shadow: 2, uppercase: true });
+    else if (t === "emoji") emojiPicker((em) => addOverlay({ type: "emoji", emoji: em, x: .5, y: .35, w: .22, dur: 2 }));
+    else mediaLibrary((a) => addOverlay(a));
+  });
+  $('[data-x="del"]', tlx).onclick = () => { if (!selId) return toast("Sélectionne un calque"); E.overlays = E.overlays.filter((o) => o.id !== selId); selId = null; mark(); renderTL(); if (curTab === 4) showTab(4); };
+  $('[data-x="dup"]', tlx).onclick = () => { const o = selItem(); if (!o) return toast("Sélectionne un calque"); const c = { ...deep(o), id: uid(), track: Math.max(...E.overlays.map((x) => x.track)) + 1 }; E.overlays.push(c); selId = c.id; mark(); renderTL(); };
+  $('[data-x="zoom"]', tlx).oninput = (e) => { tlZoom = Number(e.target.value); renderTL(); };
+
+  function renderTL() {
+    const D = Math.max(outDur(), 0.1), inn = $(".tlin", tlx), rows = $(".rows", tlx), ruler = $(".ruler", tlx);
+    inn.style.width = `${tlZoom * 100}%`;
+    const step = D * (1 / tlZoom) > 40 ? 5 : D / tlZoom > 15 ? 2 : 1;
+    ruler.innerHTML = ""; for (let s = 0; s <= D; s += step) ruler.append(h(`<span style="left:${(s / D) * 100}%">${fmt(s)}</span>`));
+    rows.innerHTML = "";
+    const row = (label, cls = "") => { const r = h(`<div class="trow ${cls}"><div class="tlab">${label}</div><div class="tlane"></div></div>`); rows.append(r); return $(".tlane", r); };
+    // piste vidéo principale (passages)
+    const vl = row("🎬 Vidéo", "main");
+    tline().forEach((g, i) => vl.append(h(`<div class="tblk vid" style="left:${(g.os / D) * 100}%;width:${(g.od / D) * 100}%">#${i + 1}${g.td ? ` <i>⇄</i>` : ""}</div>`)));
+    // sous-titres
+    const cl = row("💬 Sous-titres", "subs");
+    const st = { ...META.caption_base, ...E.style };
+    if (E.captions !== false) for (const L of groupWords(prepareWords(words.filter((w) => E.segments.some((g) => w.s >= g.s - 0.01 && w.s < g.e)), st, S.detect.keywords), st.words_per_line, st.max_chars || 18)) {
+      const a = outTime(L[0].s), b = outTime(L.at(-1).e);
+      if (b > a) cl.append(h(`<div class="tblk sub" style="left:${(a / D) * 100}%;width:${((b - a) / D) * 100}%" title="${esc(L.map((w) => w.w).join(" "))}"></div>`));
+    }
+    // pistes des calques
+    const nT = Math.max(0, ...E.overlays.map((o) => o.track + 1)) + 1;
+    const lanes = [];
+    for (let t = nT - 1; t >= 0; t--) lanes[t] = row(`Piste ${t + 1}`, "olane");
+    for (const o of E.overlays) {
+      const b = h(`<div class="tblk ov ${o.id === selId ? "sel" : ""}" style="left:${(o.start / D) * 100}%;width:${((o.end - o.start) / D) * 100}%;background:${OCOL[o.type]}">
+        <div class="eh l"></div><span>${OICO[o.type]} ${esc(ovlLabel(o))}</span><div class="eh r"></div></div>`);
+      lanes[o.track].append(b);
+      b.onpointerdown = (e) => {
+        e.preventDefault(); selId = o.id; showTab(4);
+        $$(".tblk.ov", tlx).forEach((x) => x.classList.remove("sel")); b.classList.add("sel");
+        const lane = b.parentElement, W0 = lane.clientWidth, x0 = e.clientX, y0 = e.clientY, s0 = o.start, e0 = o.end, t0 = o.track;
+        const mode = e.target.classList.contains("l") ? "l" : e.target.classList.contains("r") ? "r" : "m";
+        const rowH = lane.parentElement.offsetHeight, snapPts = [0, D, outTime(master.currentTime), ...E.overlays.filter((x) => x !== o).flatMap((x) => [x.start, x.end])];
+        const snap = (t) => { for (const p of snapPts) if (Math.abs(p - t) < 0.12 * D / 30 + 0.05) return p; return t; };
+        b.setPointerCapture(e.pointerId); tlBusy = true;
+        b.onpointermove = (ev) => {
+          const dt = ((ev.clientX - x0) / W0) * D;
+          if (mode === "l") o.start = +clamp(snap(s0 + dt), 0, o.end - 0.2).toFixed(2);
+          else if (mode === "r") o.end = +clamp(snap(e0 + dt), o.start + 0.2, D).toFixed(2);
+          else {
+            const len = e0 - s0; let ns = clamp(snap(s0 + dt), 0, D - len); if (snap(ns + len) !== ns + len) ns = snap(ns + len) - len;
+            o.start = +clamp(ns, 0, D - len).toFixed(2); o.end = +(o.start + len).toFixed(2);
+            o.track = Math.max(0, t0 - Math.round((ev.clientY - y0) / rowH));
+          }
+          b.style.left = `${(o.start / D) * 100}%`; b.style.width = `${((o.end - o.start) / D) * 100}%`;
+          mark();
+        };
+        b.onpointerup = () => { b.onpointermove = null; tlBusy = false; renderTL(); renderProps(); };
+      };
+    }
+    // clic dans la timeline = se déplacer
+    rows.onpointerdown = (e) => { if (e.target.closest(".tblk.ov")) return; const r = $(".tlane", rows).getBoundingClientRect(); seekOut(((e.clientX - r.left) / r.width) * D); };
+    ruler.onpointerdown = rows.onpointerdown;
+  }
+  function tlPlayhead() {
+    const ph2 = $(".tph", tlx), lane = $(".tlane", tlx); if (!ph2 || !lane) return;
+    const D = Math.max(outDur(), 0.1), T = outTime(master.currentTime);
+    ph2.style.left = `${lane.offsetLeft + (T / D) * lane.clientWidth}px`;
+  }
+
+  /* ---------- sélecteur d'emoji & médiathèque */
+  function emojiPicker(cb) {
+    const L = "😂🤣😭💀😱😳🤯😡🥶🔥💯👀🙏👏💪🤡🫡😎🥵😤🤔🙄😈👑💸💰🚨⚠️❌✅⭐🎯🎮🏆💥⚡🍿🚗🚓🔫💣🧠❤️💔👍👎🤝🫠😮‍💨";
+    const m = h(`<div class="modal"><div class="card"><h2>Choisis un emoji</h2><div class="emos">${[...new Intl.Segmenter().segment(L)].map((x) => `<button>${x.segment}</button>`).join("")}</div>
+      <label class="f" style="margin-top:12px"><b>…ou colle n'importe quel emoji</b><div class="inline"><input type="text" id="emi" placeholder="🙂"><button class="btn pri" id="emok">Ajouter</button></div></label></div></div>`);
+    document.body.append(m);
+    m.onclick = (e) => { if (e.target === m) m.remove(); };
+    $$(".emos button", m).forEach((b) => b.onclick = () => { m.remove(); cb(b.textContent); });
+    $("#emok", m).onclick = () => { const v2 = $("#emi", m).value.trim(); if (v2) { m.remove(); cb(v2); } };
+  }
+  async function mediaLibrary(cb) {
+    const m = h(`<div class="modal"><div class="card" style="width:min(720px,100%)"><div class="row"><h2 style="margin:0">Médiathèque</h2><div class="spacer"></div><button class="btn sm" id="mlx">✖</button></div>
+      <div class="drop" id="mld" style="margin:14px 0">⬆️ Dépose une image, une vidéo ou un son (logo, B-roll, musique…) ou clique<input type="file" hidden multiple accept="image/*,video/*,audio/*"></div>
+      <h3>Tes médias</h3><div class="mlib" id="mll"></div>
+      <h3>Bruitages intégrés</h3><div class="mlib" id="mls"></div></div></div>`);
+    document.body.append(m);
+    const close = () => m.remove();
+    $("#mlx", m).onclick = close; m.onclick = (e) => { if (e.target === m) close(); };
+    const add = (a) => {
+      close();
+      if (a.kind === "image") cb({ type: "image", src: `asset:${a.name}`, x: .5, y: .3, w: .4, dur: 3 });
+      else if (a.kind === "video") cb({ type: "video", src: `asset:${a.name}`, x: .5, y: .35, w: .7, trim_in: 0, volume: 80, dur: Math.min(a.duration || 5, 8) });
+      else cb({ type: "audio", src: a.sfx ? `sfx:${a.name}` : `asset:${a.name}`, volume: a.sfx ? 80 : 35, duck: !a.sfx, fade_in: a.sfx ? 0 : 0.5, fade_out: a.sfx ? 0 : 1, dur: a.sfx ? 1.5 : Math.min(a.duration || 999, outDur()) });
+    };
+    async function load() {
+      const list = await api("/api/assets"), box = $("#mll", m);
+      box.innerHTML = list.length ? "" : `<div style="color:var(--mute)">Aucun média pour l'instant.</div>`;
+      for (const a of list) {
+        const prev = a.kind === "image" ? `<img src="/assets/${encodeURIComponent(a.name)}">` : a.kind === "video" ? `<video muted src="/assets/${encodeURIComponent(a.name)}#t=1"></video>` : `<div class="mi">🎵</div>`;
+        const it = h(`<div class="mitem">${prev}<span>${esc(a.name)}</span><small>${a.kind}${a.duration ? ` · ${fmt(a.duration)}` : ""}</small><button class="btn sm bad" title="Supprimer">🗑</button></div>`);
+        it.onclick = (e) => { if (e.target.closest("button")) return; add(a); };
+        $("button", it).onclick = async () => { if (confirm(`Supprimer ${a.name} ?`)) { await api(`/api/assets/${encodeURIComponent(a.name)}`, { method: "DELETE" }); load(); } };
+        box.append(it);
+      }
+    }
+    for (const [k, l] of Object.entries(META.sfx)) if (k !== "none") {
+      const it = h(`<div class="mitem"><div class="mi">🔊</div><span>${l}</span><button class="btn sm" title="Écouter">▶︎</button></div>`);
+      it.onclick = (e) => { if (e.target.closest("button")) { new Audio(`/sfx/${k}.mp3`).play(); return; } add({ kind: "audio", name: k, sfx: true }); };
+      $("#mls", m).append(it);
+    }
+    const dz = $("#mld", m), fi = $("input", dz);
+    const up = async (files) => { for (const f of files) { const fd = new FormData(); fd.append("file", f); try { await api("/api/assets", { method: "POST", body: fd }); } catch (e) { toast(e.message); } } load(); };
+    dz.onclick = () => fi.click(); fi.onchange = () => up(fi.files);
+    dz.ondragover = (e) => { e.preventDefault(); dz.classList.add("on"); }; dz.ondragleave = () => dz.classList.remove("on");
+    dz.ondrop = (e) => { e.preventDefault(); dz.classList.remove("on"); up(e.dataTransfer.files); };
+    load();
+  }
+
+  /* ---------- onglet « Calques » : propriétés du calque sélectionné */
+  let curTab = 0;
+  function tabLayers() { renderProps(); }
+  function renderProps() {
+    if (curTab !== 4) return;
+    pb.innerHTML = "";
+    const o = selItem();
+    if (!o) {
+      pb.append(h(`<div><p style="color:var(--mute);margin-top:0">Ajoute des textes, emojis, images (logo, sticker), vidéos (B-roll, réaction) et sons (musique, bruitages) avec la barre de la timeline sous l'éditeur, puis clique un calque pour le régler.</p>
+        <div class="ovlist">${E.overlays.map((x) => `<button class="btn sm" data-id="${x.id}" style="border-left:4px solid ${OCOL[x.type]}">${OICO[x.type]} ${esc(ovlLabel(x)).slice(0, 30)} · ${fmt(x.start)}→${fmt(x.end)}</button>`).join("") || `<i style="color:var(--mute)">Aucun calque.</i>`}</div></div>`));
+      $$("[data-id]", pb).forEach((b) => b.onclick = () => { selId = b.dataset.id; renderTL(); renderProps(); });
+      return;
+    }
+    const f = (lab, html) => `<label class="f"><b>${lab}</b>${html}</label>`;
+    const num = (k, v, step = 0.1, min = 0, max = 9999) => `<input type="number" data-o="${k}" data-n step="${step}" min="${min}" max="${max}" value="${v ?? ""}">`;
+    const rng = (k, v, min, max, step) => `<input type="range" data-o="${k}" data-n min="${min}" max="${max}" step="${step}" value="${v}">`;
+    const anims = (k, v) => `<select data-o="${k}">${Object.entries(k === "anim_out" ? { none: "Aucune", fade: "Fondu" } : META.ovl_anims).filter(([a]) => o.type === "text" || a !== "typewriter").map(([a, l]) => `<option value="${a}" ${a === v ? "selected" : ""}>${l}</option>`).join("")}</select>`;
+    let html = `<div class="row" style="margin-bottom:12px"><b style="font-size:15px">${OICO[o.type]} ${esc(ovlLabel(o)).slice(0, 40)}</b><div class="spacer"></div><button class="btn sm" data-b="seek">▶︎ Aller</button><button class="btn sm" data-b="here">⇤ Commencer ici</button><button class="btn sm" data-b="none">✖</button></div>
+      <div class="grid2" style="gap:10px">${f("Début (s)", num("start", o.start))}${f("Fin (s)", num("end", o.end))}</div>`;
+    if (o.type === "text") html += `${f("Texte", `<textarea data-o="text">${esc(o.text)}</textarea>`)}
+      <div class="grid2" style="gap:10px">${f("Police", `<select data-o="font">${META.fonts.map((x) => `<option ${x === o.font ? "selected" : ""}>${x}</option>`).join("")}</select>`)}${f(`Taille ${o.size}`, rng("size", o.size, 20, 260, 1))}
+      ${f("Entrée", anims("anim_in", o.anim_in))}${f("Sortie", anims("anim_out", o.anim_out))}${f(`Contour ${o.outline ?? 0}`, rng("outline", o.outline ?? 0, 0, 14, 1))}${f(`Rotation ${o.rotation || 0}°`, rng("rotation", o.rotation || 0, -30, 30, 1))}</div>
+      <div class="row" style="margin-bottom:12px"><label class="inline">Texte <input type="color" data-o="color" value="${o.color || "#ffffff"}"></label><label class="inline">Contour <input type="color" data-o="outline_color" value="${o.outline_color || "#000000"}"></label>
+      <label class="inline"><input type="checkbox" data-o="has_bg" ${o.bg ? "checked" : ""}> Fond</label><input type="color" data-o="bg" value="${o.bg || "#E11D48"}"><label class="inline"><input type="checkbox" data-o="uppercase" ${o.uppercase ? "checked" : ""}> MAJ</label></div>
+      <small style="color:var(--mute)">Astuce : les emojis dans un texte sortent en noir et blanc au rendu ; utilise plutôt « ＋ Emoji ».</small>`;
+    if (o.type === "emoji") html += `${f("Emoji", `<input type="text" data-o="emoji" value="${esc(o.emoji)}">`)}`;
+    if (["emoji", "image", "video"].includes(o.type)) html += `<div class="grid2" style="gap:10px">${f(`Taille ${Math.round((o.w ?? .4) * 100)}%`, rng("w", o.w ?? .4, .05, 1.2, .01))}${f(`Opacité ${o.opacity ?? 100}%`, rng("opacity", o.opacity ?? 100, 10, 100, 1))}
+      ${f("Entrée", anims("anim_in", o.anim_in))}${f("Sortie", anims("anim_out", o.anim_out))}${f(`Rotation ${o.rotation || 0}°`, rng("rotation", o.rotation || 0, -45, 45, 1))}</div>`;
+    if (["video", "audio"].includes(o.type)) html += `<div class="grid2" style="gap:10px">${f("Démarrer le média à (s)", num("trim_in", o.trim_in || 0))}${f(`Volume ${o.volume ?? 100}%`, rng("volume", o.volume ?? 100, 0, 200, 1))}</div>`;
+    if (o.type === "video") html += `<label class="inline f"><input type="checkbox" data-o="muted" ${o.muted ? "checked" : ""}><b>Couper le son de cette vidéo</b></label>`;
+    if (o.type === "audio") html += `<div class="grid2" style="gap:10px">${f("Fondu d'entrée (s)", num("fade_in", o.fade_in || 0))}${f("Fondu de sortie (s)", num("fade_out", o.fade_out || 0))}</div>
+      <label class="inline f"><input type="checkbox" data-o="duck" ${o.duck ? "checked" : ""}><b>Baisser automatiquement quand le streamer parle (ducking)</b></label>`;
+    html += `<div class="row" style="margin-top:8px"><button class="btn sm" data-b="dup">⧉ Dupliquer</button><button class="btn sm bad" data-b="del">🗑 Supprimer</button></div>`;
+    pb.append(h(`<div>${html}</div>`));
+    $$("[data-o]", pb).forEach((i) => i.oninput = () => {
+      const k = i.dataset.o;
+      let val = i.type === "checkbox" ? i.checked : i.hasAttribute("data-n") ? Number(i.value) : i.value;
+      if (k === "has_bg") { o.bg = val ? $('[data-o="bg"]', pb).value : ""; }
+      else if (k === "bg") { if ($('[data-o="has_bg"]', pb).checked) o.bg = val; }
+      else o[k] = val;
+      if (k === "start") o.start = clamp(o.start, 0, o.end - 0.2);
+      if (k === "end") o.end = clamp(o.end, o.start + 0.2, outDur());
+      const lab = i.closest("label")?.querySelector("b");
+      if (lab && i.type === "range") lab.textContent = lab.textContent.replace(/-?[\d.]+(%|°)?$/, k === "w" ? `${Math.round(val * 100)}%` : `${val}${k === "opacity" || k === "volume" ? "%" : k === "rotation" ? "°" : ""}`);
+      mark(); if (["start", "end", "text", "emoji"].includes(k)) renderTL();
+    });
+    $('[data-b="seek"]', pb).onclick = () => seekOut(o.start + 0.01);
+    $('[data-b="here"]', pb).onclick = () => { const len = o.end - o.start; o.start = +outTime(master.currentTime).toFixed(2); o.end = +Math.min(o.start + len, outDur()).toFixed(2); mark(); renderTL(); renderProps(); };
+    $('[data-b="none"]', pb).onclick = () => { selId = null; renderTL(); renderProps(); };
+    $('[data-b="dup"]', pb).onclick = () => $('[data-x="dup"]', tlx).click();
+    $('[data-b="del"]', pb).onclick = () => $('[data-x="del"]', tlx).click();
+  }
+
+  master.addEventListener("loadedmetadata", () => { iw = master.videoWidth; ih = master.videoHeight; dur = master.duration; master.playbackRate = E.speed; seek(E.trim[0]); buildStage(); showTab(0); renderTL(); });
   loop();
 
   /* ---- onglets */
@@ -779,7 +1080,8 @@ async function viewEditor(v, id) {
   function showTab(i) {
     $$(".ptabs button").forEach((b) => b.classList.toggle("on", +b.dataset.t === i));
     pb.innerHTML = "";
-    [tabTrim, tabWords, tabStyle, tabCrop, tabWhy, tabPublish][i]();
+    curTab = i;
+    [tabTrim, tabWords, tabStyle, tabCrop, tabLayers, tabWhy, tabPublish][i]();
   }
 
   function tabTrim() {

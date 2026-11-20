@@ -215,3 +215,44 @@ label.f small{font-size:12px;color:var(--mute)}
 .trs .tt{color:var(--mute);font-size:11px;margin-right:8px;font-variant-numeric:tabular-nums;user-select:none}
 .trg{float:right;margin:6px 0 0 6px;padding:3px 8px;font-size:12px}
 .trs.game{opacity:.45;text-decoration:line-through}
+/* ---------- timeline multi-pistes */
+.ovl{position:absolute;inset:0;pointer-events:none}
+.ovl .ot,.ovl .om{position:absolute;pointer-events:auto;cursor:move;touch-action:none}
+.ovl .ot span{display:inline-block;white-space:pre;text-align:center;line-height:1.15;paint-order:stroke fill}
+.ovl .om img,.ovl .om video{width:100%;display:block;pointer-events:none}
+.ovl .sel{outline:2px dashed #fff;outline-offset:4px}
+.ovl .rz{display:none;position:absolute;right:-10px;bottom:-10px;width:18px;height:18px;border-radius:50%;background:var(--acc);border:2px solid #fff;cursor:nwse-resize}
+.ovl .sel .rz{display:block}
+.tlx{margin-top:22px;padding:14px}
+.tlbar{gap:8px;margin-bottom:10px}
+.tlscroll{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--bg)}
+.tlin{position:relative;min-width:100%;padding-bottom:6px}
+.ruler{position:relative;height:22px;margin-left:110px;border-bottom:1px solid var(--line);cursor:pointer}
+.ruler span{position:absolute;top:4px;font-size:10px;color:var(--mute);transform:translateX(-50%)}
+.trow{display:flex;height:34px;border-bottom:1px solid #1d1d25}
+.trow.main,.trow.subs{background:#0f0f14}
+.tlab{flex:none;width:110px;font-size:11px;color:var(--mute);display:flex;align-items:center;padding-left:10px;position:sticky;left:0;background:var(--bg);z-index:2}
+.tlane{position:relative;flex:1}
+.tblk{position:absolute;top:4px;bottom:4px;border-radius:6px;font-size:11px;color:#fff;overflow:hidden;white-space:nowrap;display:flex;align-items:center;padding:0 8px;box-sizing:border-box}
+.tblk.vid{background:#4c1d95;border:1px solid #7c3aed}
+.tblk.vid i{font-style:normal;opacity:.7;margin-left:4px}
+.tblk.sub{background:#334155;top:9px;bottom:9px;padding:0}
+.tblk.ov{cursor:grab;touch-action:none;border:1px solid #ffffff30}
+.tblk.ov span{pointer-events:none;overflow:hidden;text-overflow:ellipsis}
+.tblk.ov.sel{outline:2px solid #fff;z-index:3}
+.tblk .eh{position:absolute;top:0;bottom:0;width:8px;cursor:ew-resize;background:#ffffff40}
+.tblk .eh.l{left:0}.tblk .eh.r{right:0}
+.tph{position:absolute;top:0;bottom:0;width:2px;background:#fff;pointer-events:none;z-index:4;box-shadow:0 0 6px #fff8}
+.emos{display:grid;grid-template-columns:repeat(auto-fill,minmax(44px,1fr));gap:6px}
+.emos button{font-size:26px;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:6px;cursor:pointer}
+.emos button:hover{border-color:var(--acc)}
+.mlib{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px}
+.mitem{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:8px;cursor:pointer;display:grid;gap:4px;position:relative}
+.mitem:hover{border-color:var(--acc)}
+.mitem img,.mitem video{width:100%;height:70px;object-fit:cover;border-radius:6px}
+.mitem .mi{height:50px;display:grid;place-items:center;font-size:24px}
+.mitem span{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mitem small{color:var(--mute);font-size:11px}
+.mitem .btn{position:absolute;top:6px;right:6px;padding:2px 6px}
+.ovlist{display:grid;gap:6px}
+.ovlist .btn{justify-content:flex-start}

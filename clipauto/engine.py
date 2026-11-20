@@ -263,7 +263,7 @@ class Engine:
         try:
             async with self.cpu:
                 out = await clipper.render(src, clip["words"], clip["edit"], src.parent / f"final_{int(time.time())}.mp4",
-                                           keywords=self.db.settings()["detect"]["keywords"])
+                                           keywords=self.db.settings()["detect"]["keywords"], data_dir=self.data)
             old = clip.get("path")
             e = clip["edit"]
             thumb = await clipper.thumbnail(out, min(1.5, clipper.output_duration(e) / 2), src.parent / "thumb.jpg")

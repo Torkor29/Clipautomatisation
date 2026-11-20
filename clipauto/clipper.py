@@ -326,7 +326,8 @@ async def has_audio(path: Path) -> bool:
     return bool(out.strip())
 
 
-async def render(source: Path, words: list[dict], edit: dict, out: Path, keywords: list[str] | None = None) -> Path:
+async def render(source: Path, words: list[dict], edit: dict, out: Path, keywords: list[str] | None = None,
+                 data_dir: Path | None = None) -> Path:
     """Rendu 9:16 : segments (découpes multiples) + effets + transitions xfade + sous-titres karaoké."""
     iw, ih = await probe_size(source)
     audio = await has_audio(source)
@@ -344,10 +345,12 @@ async def render(source: Path, words: list[dict], edit: dict, out: Path, keyword
             if ts:
                 sfx_wav = Path(td) / "sfx.wav"
                 await asyncio.to_thread(_sfx_track, st["sfx"], ts, total, float(st.get("sfx_volume", 35)) / 100, sfx_wav)
-        ass.write_text(build_ass(rwords, edit["style"],
-                                 offset=0, duration=total, hook=edit.get("hook"), hook_text=edit.get("title", ""),
-                                 layout=edit.get("layout"), keywords=keywords),
-                       encoding="utf-8")
+        from . import overlays as ovl
+        items = ovl.clean(edit.get("overlays"))
+        ass_txt = build_ass(rwords, edit["style"], offset=0, duration=total, hook=edit.get("hook"),
+                            hook_text=edit.get("title", ""), layout=edit.get("layout"), keywords=keywords)
+        ass_txt += "\n".join(ovl.text_events(items, total)) + "\n"
+        ass.write_text(ass_txt, encoding="utf-8")
         parts = []
         for i, seg in enumerate(tl):
             f = seg_speed(seg, sp)
@@ -372,15 +375,26 @@ async def render(source: Path, words: list[dict], edit: dict, out: Path, keyword
                 if audio:
                     parts.append(f"[{acur}][a{i}]concat=n=2:v=0:a=1[ax{i}]")
             vcur, acur = f"vx{i}", f"ax{i}"
-        parts.append(f"[{vcur}]ass={ass}:fontsdir={FONTS_DIR}[out]")
         extra = []
         if sfx_wav:
             extra = ["-i", str(sfx_wav)]
             parts.append(f"[{acur}][1:a]amix=inputs=2:duration=first:normalize=0[amx]")
             acur = "amx"
+        # calques de la timeline : images / emojis / vidéos, puis textes (libass) par-dessus
+        ddir = data_dir or source.parent.parent.parent
+        vargs, vparts, vcur, vaudio = ovl.visual_chain(items, ddir, SFX_DIR, 1 + len(extra) // 2, vcur, total)
+        extra += vargs
+        parts += vparts
+        aargs, aaudio = ovl.audio_inputs(items, ddir, SFX_DIR, 1 + len([a for a in extra if a == "-i"]))
+        extra += aargs
+        parts.append(f"[{vcur}]ass={ass}:fontsdir={FONTS_DIR}[out]")
+        if vaudio or aaudio:
+            mparts, acur = ovl.audio_mix(acur if audio else None, vaudio + aaudio, total)
+            parts += mparts
+            audio = True
         amap = ["-map", f"[{acur}]"] if audio else []
         await run("ffmpeg", "-loglevel", "error", "-y", "-i", str(source), *extra, "-filter_complex", ";".join(parts),
-                  "-map", "[out]", *amap, "-c:v", "libx264", "-preset", "faster", "-crf", "20",
+                  "-map", "[out]", *amap, "-t", f"{total:.3f}", "-c:v", "libx264", "-preset", "faster", "-crf", "20",
                   "-pix_fmt", "yuv420p", "-r", "30", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart",
                   str(out))
     log.info("rendu: %s", out)
