@@ -80,7 +80,9 @@ def create_app(data_dir: Path | None = None, start_engine: bool = True) -> FastA
         clips = eng.db.clips(limit=1000)
         counts = {s: sum(c["status"] == s for c in clips) for s in ("pending", "approved", "published", "rejected")}
         return {"streamers": streamers, "jobs": eng.db.jobs(), "counts": counts,
-                "integrations": {"twitch": bool(os.environ.get("TWITCH_CLIENT_ID")),
+                "ai_usage": eng.db.settings().get("ai_usage") or {},
+                "integrations": {"gemini": bool(os.environ.get("GEMINI_API_KEY")),
+                                 "twitch": bool(os.environ.get("TWITCH_CLIENT_ID")),
                                  "discord": bool(os.environ.get("DISCORD_BOT_TOKEN")),
                                  "postforme": bool(os.environ.get("POST_FOR_ME_API_KEY"))}}
 
@@ -166,6 +168,15 @@ def create_app(data_dir: Path | None = None, start_engine: bool = True) -> FastA
                                             language or cfg["language"])
         eng.db.update_clip(cid, words=words)
         return {"words": words}
+
+    @app.post("/api/clips/{cid}/facecam")
+    async def detect_facecam(cid: int):
+        from . import facecam
+        c = clip_or_404(cid)
+        r = await asyncio.to_thread(facecam.detect, Path(c["source"]))
+        if not r:
+            raise HTTPException(404, "aucun visage détecté")
+        return r
 
     @app.post("/api/clips/{cid}/approve")
     async def approve(cid: int):

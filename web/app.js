@@ -90,7 +90,9 @@ async function viewClips(v) {
 }
 
 function clipCard(c, reload) {
-  const sc = Math.round(100 * (1 - Math.exp(-Math.max(c.score, 0) / 2))); // 1.4→50, 3→78, 5→92
+  const sc = c.detail?.viral ?? Math.round(100 * (1 - Math.exp(-Math.max(c.score, 0) / 2)));
+  const top = (c.detail?.signals || []).filter((x) => x.strong).slice(0, 2).map((x) => `${x.label.split(" (")[0]}${x.ratio ? ` ×${x.ratio}` : ""}`);
+  const why = [...top, ...(c.detail?.analysis?.reasons || []).slice(0, 1)].join(" · ");
   const cls = sc >= 70 ? "hi" : sc >= 40 ? "mid" : "lo";
   const rendering = ["rendering", "queued"].includes(c.render_status);
   const el = h(`<div class="clipc">
@@ -103,6 +105,8 @@ function clipCard(c, reload) {
     </div>
     <div class="meta">
       <div class="t">${esc(c.title || "Sans titre")}</div>
+      ${why ? `<div class="reason-line" title="${esc(why)}">🔍 ${esc(why)}</div>` : ""}
+      ${c.status === "rejected" && c.error ? `<div class="reason-line" style="color:var(--warn)">${esc(c.error)}</div>` : ""}
       <div class="row" style="gap:6px"><span class="pill">${esc(c.streamer || "—")}</span><span class="pill ${c.status}">${statusLabel(c.status)}</span>${c.origin === "compilation" ? `<span class="pill" style="color:var(--acc2)">résumé</span>` : ""}</div>
       <div class="acts">
         <a class="btn sm" href="#/edit/${c.id}" title="Éditer">✂️</a>
@@ -331,7 +335,7 @@ async function viewSettings(v) {
      <div class="weights">${Object.keys(names).map((k) => `<span>${names[k]}</span><input type="range" min="0" max="3" step="0.1" data-p="detect.weights.${k}" value="${d.weights[k] ?? 0}" oninput="this.nextElementSibling.textContent=this.value"><b>${d.weights[k] ?? 0}</b>`).join("")}</div>
      <h3>Timing</h3>
      <div class="grid2" style="gap:10px">
-      <label class="f"><b>Délai du chat (s)</b><input type="number" data-p="detect.chat_delay_seconds" data-n value="${d.chat_delay_seconds}"><small>Le chat réagit en retard</small></label>
+      <label class="f"><b>Temps de réaction du chat (s)</b><input type="number" data-p="detect.chat_delay_seconds" data-n value="${d.chat_delay_seconds}"><small>Le chat réagit ~5-10 s après l'action</small></label>
       <label class="f"><b>Pause entre 2 clips (s)</b><input type="number" data-p="detect.cooldown_seconds" data-n value="${d.cooldown_seconds}"></label>
       <label class="f"><b>Calibrage au début (s)</b><input type="number" data-p="detect.warmup_seconds" data-n value="${d.warmup_seconds}"></label>
       <label class="f"><b>Max clips / heure</b><input type="number" data-p="detect.max_clips_per_hour" data-n value="${d.max_clips_per_hour}"></label>
@@ -349,6 +353,7 @@ async function viewSettings(v) {
       <label class="f"><b>Avant le pic (s)</b><input type="number" data-p="clip.pre_roll" data-n value="${c.pre_roll}"><small>La montée en tension</small></label>
       <label class="f"><b>Après le pic (s)</b><input type="number" data-p="clip.post_roll" data-n value="${c.post_roll}"><small>La réaction</small></label>
      </div>
+     <label class="f"><b>Score viral minimum : <span id="mvv">${c.min_viral}</span>/100</b><input type="range" min="0" max="90" step="5" data-p="clip.min_viral" value="${c.min_viral}" oninput="mvv.textContent=this.value"><small>En dessous, le clip est écarté automatiquement (visible dans « Rejetés » avec la raison). Monte-le si tu as trop de clips.</small></label>
      <label class="inline f"><input type="checkbox" data-p="clip.snap_to_sentences" ${c.snap_to_sentences ? "checked" : ""}><b>Couper entre deux phrases (jamais au milieu d'un mot)</b></label>
      <label class="inline f"><input type="checkbox" data-p="clip.auto_render" ${c.auto_render ? "checked" : ""}><b>Rendu final automatique</b></label>
      <div class="grid2" style="gap:10px">
@@ -357,6 +362,18 @@ async function viewSettings(v) {
      </div>
    </div>
    <div class="card"><h2>🎨 Style par défaut des nouveaux clips</h2><div id="stylebox"></div></div>
+   <div class="card"><h2>🤖 Juge IA (optionnel, payant)</h2>
+     <p style="color:var(--mute);margin-top:0">Sans IA, l'outil analyse déjà gratuitement le chat, le son et ce qui est dit. L'IA ajoute un avis + un titre accrocheur. <b>Désactivée par défaut.</b></p>
+     <label class="inline f"><input type="checkbox" data-p="ai.enabled" ${S.ai.enabled ? "checked" : ""}><b>Activer le juge IA</b></label>
+     <div class="grid2" style="gap:10px">
+      <label class="f"><b>Fournisseur</b><select data-p="ai.provider"><option value="gemini" ${S.ai.provider === "gemini" ? "selected" : ""}>Gemini (clé GEMINI_API_KEY)</option><option value="ollama" ${S.ai.provider === "ollama" ? "selected" : ""}>Ollama (gratuit, sur ton serveur)</option></select></label>
+      <label class="f"><b>Modèle</b><input type="text" data-p="ai.model" value="${esc(S.ai.model)}"></label>
+      <label class="f"><b>Plafond d'appels / jour</b><input type="number" data-p="ai.max_calls_per_day" data-n value="${S.ai.max_calls_per_day}"><small>1 appel par clip</small></label>
+      <label class="f"><b>Utilisé aujourd'hui</b><input type="text" disabled value="${(S.ai_usage?.day === new Date().toISOString().slice(0, 10) ? S.ai_usage.calls : 0)} appel(s)"></label>
+     </div>
+     <label class="inline f"><input type="checkbox" data-p="ai.use_title" ${S.ai.use_title ? "checked" : ""}><b>Utiliser le titre proposé par l'IA</b></label>
+     <small style="color:var(--mute)">Coût estimé avec gemini-2.5-flash-lite : ~0,0002 $ par clip (≈ 1 000 tokens) → 30 clips/jour ≈ 0,20 $/mois. Le plafond bloque tout dépassement.</small>
+   </div>
    <div class="card"><h2>🎬 Résumés de live</h2>
      <div class="grid2" style="gap:10px">
       <label class="f"><b>Transition par défaut</b><select data-p="compilation.transition">${Object.entries(META.transitions).map(([k, l]) => `<option value="${k}" ${k === S.compilation.transition ? "selected" : ""}>${l}</option>`).join("")}</select></label>
@@ -415,6 +432,18 @@ function styleControls(box, st, layout, hook, onChange) {
     <div class="row" style="margin-bottom:14px">
       <label class="inline"><input type="checkbox" data-s="uppercase" ${st.uppercase ? "checked" : ""}> MAJUSCULES</label>
       <label class="inline"><input type="checkbox" data-s="pop" ${st.pop ? "checked" : ""}> Animation « pop »</label>
+      <label class="inline"><input type="checkbox" data-s="clean_punct" ${st.clean_punct !== false ? "checked" : ""}> Sans ponctuation</label>
+      <label class="inline"><input type="checkbox" data-s="remove_fillers" ${st.remove_fillers !== false ? "checked" : ""}> Retirer « euh, bah »</label>
+    </div>
+    <div class="row" style="margin-bottom:12px">
+      <label class="inline"><input type="checkbox" data-s="emphasis" ${st.emphasis !== false ? "checked" : ""}> Mots forts en couleur</label>
+      <input type="color" data-s="emphasis_color" value="${st.emphasis_color || "#FF4D4D"}">
+      <label class="inline"><input type="checkbox" data-s="box" ${st.box ? "checked" : ""}> Fond en boîte</label>
+      <input type="color" data-s="box_color" value="${st.box_color || "#000000"}">
+      <label class="inline">opacité <input type="number" min="0" max="100" style="width:64px" data-s="box_opacity" data-n value="${st.box_opacity ?? 70}"></label>
+    </div>
+    <div class="row" style="margin-bottom:14px">
+      <label class="inline"><input type="checkbox" data-s="auto_position" ${st.auto_position !== false ? "checked" : ""}> Position auto (sur la jonction cam / jeu en format 50/50)</label>
     </div>
     <h3>Format</h3>
     <div class="layouts">${layoutBtns(layout.mode)}</div>
@@ -436,13 +465,31 @@ function layoutBtns(mode) {
   const L = {
     blur: ["Fond flou", `<rect x="1" y="1" width="26" height="44" rx="3" fill="#555"/><rect x="1" y="16" width="26" height="14" fill="#a78bfa"/>`],
     fill: ["Plein écran", `<rect x="1" y="1" width="26" height="44" rx="3" fill="#a78bfa"/>`],
-    split: ["Facecam + jeu", `<rect x="1" y="1" width="26" height="18" rx="3" fill="#f472b6"/><rect x="1" y="21" width="26" height="24" rx="3" fill="#38bdf8"/>`],
+    split: ["Cam + jeu", `<rect x="1" y="1" width="26" height="21" rx="3" fill="#f472b6"/><rect x="1" y="24" width="26" height="21" rx="3" fill="#38bdf8"/>`],
+    pip: ["Cam incrustée", `<rect x="1" y="1" width="26" height="44" rx="3" fill="#38bdf8"/><rect x="4" y="6" width="11" height="8" rx="2" fill="#f472b6" stroke="#fff"/>`],
     fit: ["Bandes noires", `<rect x="1" y="1" width="26" height="44" rx="3" fill="#111"/><rect x="1" y="16" width="26" height="14" fill="#a78bfa"/>`],
   };
   return Object.entries(L).map(([k, [n, svg]]) => `<button data-lm="${k}" class="${mode === k ? "on" : ""}"><svg viewBox="0 0 28 46">${svg}</svg>${n}</button>`).join("");
 }
 
 /* ===================================================================== EDITOR */
+const EMOTION = new Set(["putain","wesh","frère","frérot","gros","zebi","sah","dingue","dinguerie","incroyable","jamais","mdr","ptdr","oh","ah","non","attends","attend","quoi","comment","sérieux","sérieusement","fou","folie","malade","choqué","choquant","ouf","énorme","abusé","abuse","trop","nul","merde","bordel","honte","pitié","aïe","chaud","grave","omg","wtf","arrête","arrêtez","regarde","regardez","vas-y","allez","bravo","gagné","perdu","mort","tué","police","flic","braquage","argent","million","bro","dude","insane","crazy","what","wait","no","yes","god","fuck","shit","damn","holy","never","dead","won","lost","money","cops","run"]);
+const FILLERS = new Set(["euh", "heu", "hum", "bah", "ben", "hein", "um", "uh", "erm"]);
+const baseWord = (w) => w.toLowerCase().replace(/[^\p{L}\p{N}'’-]/gu, "");
+function prepareWords(words, st, keywords) { // identique à captions.prepare_words (Python)
+  const kws = (keywords || []).map((k) => k.toLowerCase().replace(/\*$/, "")).filter(Boolean);
+  const out = [];
+  for (const w of words) {
+    const raw = (w.w || "").trim(), b = baseWord(raw);
+    if (st.remove_fillers !== false && FILLERS.has(b)) continue;
+    const txt = st.clean_punct !== false ? raw.replace(/[.,;:…«»"“”()]+/g, "") : raw;
+    if (!txt.trim()) continue;
+    const emph = st.emphasis !== false && !!b && (EMOTION.has(b) || kws.some((k) => b.startsWith(k)) || /\d/.test(b));
+    out.push({ ...w, w: txt, p: ".?!,;:".includes(raw.slice(-1)) ? raw.slice(-1) : "", x: emph, src: w });
+  }
+  return out;
+}
+const captionY = (st, L) => (st.auto_position !== false && L && L.mode === "split") ? L.split_ratio * 100 : st.position;
 function groupWords(words, perLine, maxChars) { // identique à captions.group_words (Python)
   const lines = []; let cur = [];
   for (const w of words) {
@@ -450,7 +497,8 @@ function groupWords(words, perLine, maxChars) { // identique à captions.group_w
     if (cur.length) {
       const gap = w.s - cur.at(-1).e;
       const chars = cur.reduce((a, x) => a + x.w.trim().length + 1, 0) + w.w.trim().length;
-      if (cur.length >= perLine || gap > 0.6 || chars > maxChars || ".?!,".includes(cur.at(-1).w.trim().slice(-1))) { lines.push(cur); cur = []; }
+      const lp = cur.at(-1).p ?? cur.at(-1).w.trim().slice(-1);
+      if (cur.length >= perLine || gap > 0.6 || chars > maxChars || (lp && ".?!,".includes(lp))) { lines.push(cur); cur = []; }
     }
     cur.push(w);
   }
@@ -509,7 +557,7 @@ async function viewEditor(v, id) {
       <div class="savebar" id="outbar"></div>
     </div>
     <div class="panel">
-      <div class="ptabs">${["✂️ Montage", "Sous-titres", "Style", "Cadrage", "Publier"].map((t, i) => `<button data-t="${i}" class="${i ? "" : "on"}">${t}</button>`).join("")}</div>
+      <div class="ptabs">${["✂️ Montage", "Sous-titres", "Style", "Cadrage", "🔍 Pourquoi ?", "Publier"].map((t, i) => `<button data-t="${i}" class="${i ? "" : "on"}">${t}</button>`).join("")}</div>
       <div class="pbody" id="pb"></div>
     </div></div>`);
   v.append(ed);
@@ -535,8 +583,21 @@ async function viewEditor(v, id) {
     const box = (top, hh) => { const b = h(`<div class="box"></div>`); Object.assign(b.style, { top: `${top}px`, height: `${hh}px` }); ph.append(b); return b; };
     if (L.mode === "split") {
       const th = Math.round(H * L.split_ratio), bh = H - th;
-      place(mk(), box(0, th), W, th, cropRect(L.facecam, iw, ih, W / th));
-      place(mk(), box(th, bh), W, bh, cropRect(L.gameplay, iw, ih, W / bh));
+      if (L.cam_position === "bottom") {
+        place(mk(), box(0, th), W, th, cropRect(L.gameplay, iw, ih, W / th));
+        place(mk(), box(th, bh), W, bh, cropRect(L.facecam, iw, ih, W / bh));
+      } else {
+        place(mk(), box(0, th), W, th, cropRect(L.facecam, iw, ih, W / th));
+        place(mk(), box(th, bh), W, bh, cropRect(L.gameplay, iw, ih, W / bh));
+      }
+    } else if (L.mode === "pip") {
+      place(mk(), box(0, H), W, H, cropRect(L.gameplay, iw, ih, W / H));
+      const fc = L.facecam, cw = W * (L.pip_size || .42), chh = Math.min(cw * (fc.h * ih) / (fc.w * iw), H / 2);
+      const k = W / 1080, m = 40 * k, c = L.pip_corner || "tl";
+      const b = h(`<div class="box" style="border:${6 * k}px solid #fff;border-radius:${10 * k}px;box-sizing:content-box"></div>`);
+      Object.assign(b.style, { width: `${cw}px`, height: `${chh}px`, left: c[1] === "l" ? `${m}px` : `${W - cw - m - 12 * k}px`,
+        top: c[0] === "t" ? `${220 * k}px` : `${H - chh - (m + 200 * k) - 12 * k}px` });
+      ph.append(b); place(mk(), b, cw, chh, cropRect(fc, iw, ih, cw / chh));
     } else if (L.mode === "fill") {
       const nw = ih * 9 / 16; const x = clamp((L.focus?.x ?? .5) * iw - nw / 2, 0, iw - nw);
       place(mk(), box(0, H), W, H, { x, y: 0, w: nw, h: ih });
@@ -555,19 +616,20 @@ async function viewEditor(v, id) {
   let lines = [];
   function draw() {
     const st = E.style, k = ph.clientWidth / 1080, t = master.currentTime - shift;
-    lines = groupWords(words.filter((w) => E.segments.some((g) => w.s >= g.s - 0.01 && w.s < g.e)), st.words_per_line, st.max_chars || 18);
+    lines = groupWords(prepareWords(words.filter((w) => E.segments.some((g) => w.s >= g.s - 0.01 && w.s < g.e)), st, S.detect.keywords), st.words_per_line, st.max_chars || 18);
     let html = "";
     for (const L of lines) {
-      const end = L.at(-1).e + 0.15;
+      const nx = lines[lines.indexOf(L) + 1], end = Math.min(L.at(-1).e + 0.15, nx ? nx[0].s : 1e9);
       if (t >= L[0].s && t < end) {
         const ai = L.findIndex((w, i) => t >= w.s && (i + 1 >= L.length || t < L[i + 1].s));
-        html = L.map((w, i) => { const tx = esc(st.uppercase ? w.w.trim().toUpperCase() : w.w.trim()); return i === ai ? `<span style="color:${st.highlight};${st.pop ? "transform:scale(1.12)" : ""}">${tx}</span>` : `<span>${tx}</span>`; }).join(" ");
+        html = L.map((w, i) => { const tx = esc(st.uppercase ? w.w.trim().toUpperCase() : w.w.trim()); return i === ai ? `<span style="color:${st.highlight};${st.pop ? "transform:scale(1.1)" : ""}">${tx}</span>` : `<span ${w.x ? `style="color:${st.emphasis_color || st.highlight}"` : ""}>${tx}</span>`; }).join(" ");
+        if (st.box) { const a = Math.round((st.box_opacity ?? 70) * 2.55).toString(16).padStart(2, "0"); html = `<span class="boxl" style="background:${st.box_color || "#000"}${a}">${html}</span>`; }
         break;
       }
     }
     Object.assign(capEl.style, {
-      top: `${st.position}%`, fontFamily: `'${st.font}'`, fontSize: `${st.size * k}px`, color: st.color,
-      WebkitTextStroke: `${st.outline * 2 * k}px ${st.outline_color}`, textShadow: st.shadow ? `${st.shadow * k}px ${st.shadow * k}px 0 #00000080` : "none",
+      top: `${captionY(st, E.layout)}%`, fontFamily: `'${st.font}'`, fontSize: `${st.size * k}px`, color: st.color, letterSpacing: `${k}px`,
+      WebkitTextStroke: st.box ? "0" : `${st.outline * 2 * k}px ${st.outline_color}`, textShadow: st.shadow && !st.box ? `${st.shadow * k}px ${st.shadow * k}px ${2 * k}px #00000099` : "none",
     });
     capEl.innerHTML = E.captions === false ? "" : html;
     const hk = E.hook, showH = hk.enabled && E.title && segAt(master.currentTime) >= 0 && outTime(master.currentTime) < hk.seconds;
@@ -628,7 +690,7 @@ async function viewEditor(v, id) {
   function showTab(i) {
     $$(".ptabs button").forEach((b) => b.classList.toggle("on", +b.dataset.t === i));
     pb.innerHTML = "";
-    [tabTrim, tabWords, tabStyle, tabCrop, tabPublish][i]();
+    [tabTrim, tabWords, tabStyle, tabCrop, tabWhy, tabPublish][i]();
   }
 
   function tabTrim() {
@@ -787,12 +849,40 @@ async function viewEditor(v, id) {
     pv.addEventListener("loadeddata", () => { pv.currentTime = master.currentTime; });
     const opts = $("#cropopts");
     const rects = [];
+    if (L.mode === "split" || L.mode === "pip") {
+      rects.push(["facecam", "face", "Cam"], ["gameplay", "game", "Jeu"]);
+      const tools = h(`<div class="row" style="margin-bottom:12px">
+        <button class="btn sm" id="dfc">🎯 Détecter la cam automatiquement</button>
+        <button class="btn sm" id="svl">💾 Cadrage par défaut pour ${esc(clip.streamer || "ce streamer")}</button></div>`);
+      opts.append(tools);
+      $("#dfc").onclick = async (e) => {
+        e.target.disabled = true; e.target.textContent = "⏳ analyse…";
+        try { const r = await api(`/api/clips/${clip.id}/facecam`, { method: "POST" }); L.facecam = r.facecam; buildStage(); mark(); showTab(3); toast(r.full_cam ? "Visage trouvé (cam plein écran : le format « Fond flou » peut suffire)" : "Cam détectée 🎯"); }
+        catch (er) { toast("Aucun visage trouvé — place le cadre rose à la main"); e.target.disabled = false; e.target.textContent = "🎯 Détecter la cam automatiquement"; }
+      };
+      $("#svl").onclick = async () => {
+        const st = await api("/api/state"); const row = st.streamers.find((x) => x.channel.toLowerCase() === (clip.streamer || "").toLowerCase());
+        if (!row) return toast("Ce streamer n'est pas dans ta liste (page Streamers)");
+        await api(`/api/streamers/${row.id}`, { method: "PATCH", json: { overrides: { ...row.overrides, layout: { ...L, auto_facecam: false } } } });
+        toast(`Les prochains clips de ${row.channel} utiliseront ce cadrage ✅`);
+      };
+    }
     if (L.mode === "split") {
-      rects.push(["facecam", "face", "Facecam"], ["gameplay", "game", "Jeu"]);
-      opts.append(h(`<label class="f"><b>Hauteur de la facecam <span id="srv">${Math.round(L.split_ratio * 100)}%</span></b><input type="range" min="0.2" max="0.6" step="0.01" id="sr" value="${L.split_ratio}"></label>`));
+      opts.append(h(`<div><label class="f"><b>Répartition cam / jeu</b></label><div class="row" style="margin-bottom:10px">${[[0.5, "50 / 50"], [0.4, "40 / 60"], [0.33, "33 / 67"], [0.25, "25 / 75"]].map(([r, l]) => `<button class="btn sm ${Math.abs(L.split_ratio - r) < .01 ? "pri" : ""}" data-ratio="${r}">${l}</button>`).join("")}
+        <button class="btn sm" id="swp">⇅ Cam ${L.cam_position === "bottom" ? "en bas" : "en haut"}</button></div>
+        <label class="f"><b>Réglage fin <span id="srv">${Math.round(L.split_ratio * 100)}%</span></b><input type="range" min="0.2" max="0.7" step="0.01" id="sr" value="${L.split_ratio}"></label></div>`));
+      $$("[data-ratio]", opts).forEach((b) => b.onclick = () => { L.split_ratio = Number(b.dataset.ratio); buildStage(); mark(); showTab(3); });
+      $("#swp").onclick = () => { L.cam_position = L.cam_position === "bottom" ? "top" : "bottom"; buildStage(); mark(); showTab(3); };
       $("#sr").oninput = (e) => { L.split_ratio = Number(e.target.value); $("#srv").textContent = `${Math.round(L.split_ratio * 100)}%`; buildStage(); mark(); };
-      opts.append(h(`<small style="color:var(--mute)">Déplace le cadre <b style="color:#f472b6">rose</b> sur la webcam du streamer et le <b style="color:#38bdf8">bleu</b> sur le jeu. Coin en bas à droite = redimensionner.</small>`));
-    } else if (L.mode === "fill") {
+    }
+    if (L.mode === "pip") {
+      opts.append(h(`<div><label class="f"><b>Taille de la cam <span id="psv">${Math.round((L.pip_size || .42) * 100)}%</span></b><input type="range" min="0.25" max="0.7" step="0.01" id="ps" value="${L.pip_size || .42}"></label>
+        <div class="row" style="margin-bottom:10px">${[["tl", "↖ haut gauche"], ["tr", "↗ haut droite"], ["bl", "↙ bas gauche"], ["br", "↘ bas droite"]].map(([c, l]) => `<button class="btn sm ${(L.pip_corner || "tl") === c ? "pri" : ""}" data-pc="${c}">${l}</button>`).join("")}</div></div>`));
+      $("#ps").oninput = (e) => { L.pip_size = Number(e.target.value); $("#psv").textContent = `${Math.round(L.pip_size * 100)}%`; buildStage(); mark(); };
+      $$("[data-pc]", opts).forEach((b) => b.onclick = () => { L.pip_corner = b.dataset.pc; buildStage(); mark(); showTab(3); });
+    }
+    if (L.mode === "split" || L.mode === "pip")
+      opts.append(h(`<small style="color:var(--mute)">Cadre <b style="color:#f472b6">rose</b> = la webcam, <b style="color:#38bdf8">bleu</b> = le jeu. Glisse pour déplacer, coin en bas à droite pour redimensionner.</small>`)); else if (L.mode === "fill") {
       rects.push(["focus", "focus", "Zone visible"]);
       opts.append(h(`<small style="color:var(--mute)">Fais glisser la bande jaune sur ce qui doit rester à l'écran.</small>`));
     } else if (L.mode === "blur") {
@@ -818,6 +908,57 @@ async function viewEditor(v, id) {
       };
       el.onpointerup = () => mode = null;
     }
+  }
+
+  function tabWhy() {
+    const d = clip.detail || {}, a = d.analysis || {}, sig = d.signals || [];
+    const col = (v) => v == null ? "var(--mute)" : v >= 70 ? "#4ade80" : v >= 45 ? "#facc15" : "#f87171";
+    const box = h(`<div>
+      <div class="why-score">
+        <div><b style="color:${col(d.viral)}">${d.viral ?? "–"}</b><small>Score viral</small></div>
+        <div><b style="color:${col(d.signal_score)}">${d.signal_score ?? "–"}</b><small>${clip.origin === "import" ? "Pics de son<br>(cris, rires)" : "Réaction du live<br>(chat + son)"}</small></div>
+        <div><b style="color:${col(a.score)}">${a.score ?? "–"}</b><small>Contenu<br>(ce qui est dit)</small></div>
+        <div><b style="color:${col(d.llm?.score)}">${d.llm?.score ?? "off"}</b><small>Avis IA<br>(optionnel)</small></div>
+      </div>
+      ${!d.viral ? `<p style="color:var(--mute)">Clip créé avant l'ajout de l'analyse : relance la détection sur de nouveaux clips pour voir le détail.</p>` : ""}
+      <h3>Ce qui a déclenché le clip</h3><div id="wsig"></div>
+      <div id="wcurve"></div>
+      <h3>Ce qui est dit</h3><ul class="reasons" id="wreas"></ul>
+      ${d.llm ? `<h3>Avis de l'IA</h3><p>${esc(d.llm.reason)}</p>` : ""}
+      <h3>Le chat à ce moment ${d.chat ? `(${d.chat.length} messages)` : ""}</h3><div id="wchat"></div>
+      ${d.facecam ? `<h3>Cadrage</h3><p style="color:var(--mute)">Cam détectée automatiquement (${d.facecam.hits} images sur 8)${d.facecam.full_cam ? " · stream en plein écran caméra" : ""}.</p>` : ""}
+    </div>`);
+    pb.append(box);
+    const ws = $("#wsig", box);
+    if (!sig.length) ws.innerHTML = `<p style="color:var(--mute)">${clip.origin === "import" ? "Vidéo importée : pas de chat, le moment a été choisi sur les pics de son (cris, rires, réactions)." : clip.origin === "compilation" ? "Résumé : assemblage des meilleurs moments choisis." : "Pas de détail disponible."}</p>`;
+    for (const x of sig) {
+      const val = x.value == null ? "–" : Math.round(x.value * 10) / 10, nor = x.normal == null ? "?" : Math.round(x.normal * 10) / 10;
+      ws.append(h(`<div class="sigrow ${x.strong ? "strong" : ""}"><div class="lb">${x.strong ? "🔥 " : ""}${esc(x.label)}<small>${x.value == null ? "écart par rapport au reste de la vidéo" : `${val} pendant le moment · ${nor} habituellement`}</small></div>
+        <div class="rt">${x.ratio ? `×${x.ratio}` : `${x.z > 0 ? "+" : ""}${x.z}σ`}</div>
+        <div class="bar"><div style="width:${clamp(x.z / 6, 0, 1) * 100}%;background:${x.strong ? "var(--grad)" : "#555"}"></div></div></div>`));
+    }
+    if (d.curve?.length > 2) {
+      const pts = d.curve, W = 600, H = 70, mx = Math.max(d.threshold * 1.5, ...pts.map((p) => p[1]));
+      const x = (i) => (i / (pts.length - 1)) * W, y = (v) => H - (v / mx) * (H - 6) - 3;
+      $("#wcurve", box).innerHTML = `<h3>Intensité du live avant le déclenchement</h3><svg class="spark" style="height:70px" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+        <path d="${pts.map((p, i) => `${i ? "L" : "M"}${x(i)},${y(p[1])}`).join("")}" fill="none" stroke="#a78bfa" stroke-width="2" vector-effect="non-scaling-stroke"/>
+        <line x1="0" x2="${W}" y1="${y(d.threshold)}" y2="${y(d.threshold)}" stroke="#f59e0b" stroke-dasharray="5 5" vector-effect="non-scaling-stroke"/></svg>
+        <small style="color:var(--mute)">Ligne orange = seuil de déclenchement (${d.threshold}). Le chat réagit ~${d.reaction ?? "?"} s après l'action : le clip est calé en conséquence.</small>`;
+    }
+    const wr = $("#wreas", box);
+    (a.reasons || []).forEach((r) => wr.append(h(`<li>✅ ${esc(r)}</li>`)));
+    (a.flags || []).forEach((r) => wr.append(h(`<li class="flag">⚠️ ${esc(r)}</li>`)));
+    if (!a.reasons && !a.flags) wr.append(h(`<li>–</li>`));
+    const wc = $("#wchat", box);
+    if (d.chat?.length) {
+      const cl = h(`<div class="chatlog"></div>`);
+      for (const m of d.chat) {
+        const row = h(`<div class="${m.tag}"><span class="tm">${m.t > 0 ? "+" : ""}${m.t.toFixed(0)}s</span><span class="us">${esc(m.u)}</span>${esc(m.m)}</div>`);
+        row.onclick = () => { if (d.peak_src != null) seek(d.peak_src + m.t - (d.reaction || 0)); };
+        cl.append(row);
+      }
+      wc.append(cl, h(`<small style="color:var(--mute)">Vert = rire · orange = hype · violet = tes mots-clés. Clic = aller à ce moment.</small>`));
+    } else wc.innerHTML = `<p style="color:var(--mute)">Aucun message enregistré pour ce clip.</p>`;
   }
 
   function tabPublish() {

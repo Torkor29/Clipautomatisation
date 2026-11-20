@@ -9,7 +9,8 @@ from pathlib import Path
 
 import numpy as np
 
-from . import clipper
+from . import clipper, facecam, virality  # noqa: F401 (facecam importe cv2 au démarrage)
+from collections import deque
 from .audio import segment_loudness
 from .chat import kick_chat, twitch_chat
 from .config import Streamer
@@ -31,12 +32,19 @@ def default_edit(settings: dict, trim: tuple[float, float], title: str = "") -> 
 
 
 def auto_title(words: list[dict], streamer: str) -> str:
-    """Titre de départ : la phrase la plus « choc » (exclamations / questions), sinon le début."""
+    """Titre de départ : la phrase courte la plus « choc » (émotion, question, exclamation)."""
+    from .virality import EMOTION
     text = " ".join(w["w"] for w in words)
-    sents = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if 3 <= len(s.split()) <= 12]
+    sents = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if 3 <= len(s.split()) <= 10]
+
+    def punch(s: str) -> float:
+        toks = [re.sub(r"[^\w'’-]", "", t.lower()) for t in s.split()]
+        return 2 * s.count("!") + 1.5 * s.count("?") + sum(t in EMOTION for t in toks) - 0.15 * abs(len(toks) - 6)
+
     if sents:
-        best = max(sents, key=lambda s: (s.count("!") * 2 + s.count("?"), -abs(len(s.split()) - 7)))
-        return best[:70]
+        best = max(sents, key=punch)
+        best = best if len(best) <= 60 else best[:57].rsplit(" ", 1)[0] + "…"
+        return re.sub(r"\s+([!?:;])", "\u00a0\\1", best)  # pas de « ! » tout seul sur une ligne
     return f"{streamer} en PLS 😭" if streamer else "Moment fort 🔥"
 
 
@@ -52,6 +60,7 @@ class Session:
         self.started = time.time()
         self.clip_times: list[float] = []
         self.chat_msgs = 0
+        self.chat_log: deque = deque(maxlen=5000)  # (t, user, texte) pour expliquer les clips
 
     def cfg(self) -> dict:
         return deep_merge(self.eng.db.settings(), self.row.get("overrides") or {})
@@ -72,6 +81,7 @@ class Session:
 
     def _on_msg(self, t, user, text):
         self.chat_msgs += 1
+        self.chat_log.append((t, user, text))
         self.det.add_message(t, user, text)
 
     async def start(self) -> None:
@@ -99,7 +109,8 @@ class Session:
         while not self.stop.is_set():
             await asyncio.sleep(self.det.window)
             cfg = self.cfg()
-            trig = self.det.step(time.time() - cfg["detect"]["chat_delay_seconds"])
+            # on analyse le chat d'il y a 15 s (le temps que la vidéo/audio correspondante soit écrite)
+            trig = self.det.step(time.time() - 15, float(cfg["detect"]["chat_delay_seconds"]))
             if not trig:
                 continue
             self.clip_times = [t for t in self.clip_times if t > time.time() - 3600]
@@ -113,6 +124,20 @@ class Session:
         c = cfg["clip"]
         pre, post = max(c["pre_roll"], c["max_seconds"]), c["post_roll"] + 5
         await asyncio.sleep(max(trig.t + post + self.rec.seg_s + 5 - time.time(), 0))
+        react = trig.detail.get("reaction", 0)
+        lo, hi = trig.t - 20, trig.t + react + 15
+        msgs = [(t, u, m) for t, u, m in self.chat_log if lo <= t <= hi]
+        lex = self.det.lexicon
+        def prio(x):
+            la, hy, kw = lex.classify(x[2])
+            return la + hy + 2 * kw
+        if len(msgs) > 60:  # garde les messages les plus parlants, en ordre chronologique
+            msgs = sorted(sorted(msgs, key=prio, reverse=True)[:60])
+        def tag(m):
+            la, hy, kw = lex.classify(m)
+            return "mot-clé" if kw else "rire" if la else "hype" if hy else ""
+        trig.detail["chat"] = [{"t": round(t - trig.t, 1), "u": u, "m": m[:200], "tag": tag(m)} for t, u, m in msgs]
+        trig.detail["chat_window"] = [round(lo - trig.t, 1), round(hi - trig.t, 1)]
         name = f"{self.streamer.channel}_{int(trig.t)}"
         src = self.eng.data / "clips" / name / "source.mp4"
         try:
@@ -183,16 +208,45 @@ class Engine:
                                     c["pre_roll"], c["post_roll"], c["snap_to_sentences"])
         kept = [w for w in words if t0 <= w["s"] < t1]
         title = auto_title(kept, streamer)
+        # ---- pourquoi ce clip : signaux + analyse du texte (+ juge IA optionnel, plafonné)
+        settings = self.db.settings()
+        analysis = virality.analyze_text(words, t0, t1, cfg["detect"]["keywords"])
+        sig = virality.signal_score(score) if detail.get("z") else None
+        usage = dict(settings.get("ai_usage") or {})
+        llm = await asyncio.to_thread(virality.llm_judge, " ".join(w["w"] for w in kept), streamer, platform,
+                                      settings["ai"], usage)
+        if usage != settings.get("ai_usage"):
+            self.db.save_settings({"ai_usage": usage})
+        if llm and settings["ai"].get("use_title") and llm.get("title"):
+            title = llm["title"]
+        viral = virality.combine(sig, analysis["score"], llm["score"] if llm else None)
+        detail = {**detail, "analysis": analysis, "signals": virality.explain_signals(detail),
+                  "signal_score": sig, "llm": llm, "viral": viral, "peak_src": round(peak, 2)}
+        layout = dict(cfg["layout"])
+        if layout.get("mode") in ("split", "pip") and layout.get("auto_facecam", True):
+            fc = await asyncio.to_thread(facecam.detect, src)
+            if fc:
+                layout["facecam"] = fc["facecam"]
+                detail["facecam"] = fc
+        min_v = int(c.get("min_viral", 0) or 0)
+        rejected = viral < min_v
         thumb = await clipper.thumbnail(src, min(peak, total - 0.5), src.parent / "thumb.jpg")
         cid = self.db.add_clip(streamer=streamer, platform=platform, source=str(src), thumb=str(thumb),
                                score=score, detail=detail, transcript=" ".join(w["w"] for w in kept),
-                               words=words, edit=default_edit(cfg, (t0, t1), title), title=title,
-                               duration=t1 - t0, origin=origin)
+                               words=words, edit={**default_edit(cfg, (t0, t1), title), "layout": layout},
+                               title=title, duration=t1 - t0, origin=origin,
+                               status="rejected" if rejected else "pending",
+                               error=f"Écarté automatiquement : score viral {viral} < minimum {min_v}" if rejected else None)
+        if rejected:
+            log.info("clip #%s écarté (score %s < %s)", cid, viral, min_v)
+            return cid
         z = detail.get("z", {})
         if c.get("auto_render", True):
             await self.render_clip(cid)
         clip = self.db.clip(cid)
-        msg = (f"🎬 **Clip #{cid}** — {streamer} ({platform}) · score {score} · {t1 - t0:.0f}s\n"
+        why = " · ".join(r for r in analysis["reasons"][:2])
+        msg = (f"🎬 **Clip #{cid}** — {streamer} ({platform}) · score viral {viral}/100 · {t1 - t0:.0f}s\n"
+               f"{why}\n"
                f"« {title} »\nchat ×{z.get('chat_rate', 0)} · rires ×{z.get('laugh_emotes', 0)} · "
                f"audio ×{z.get('audio', 0)}")
         try:
@@ -207,7 +261,8 @@ class Engine:
         self.db.update_clip(cid, render_status="rendering", error=None)
         try:
             async with self.cpu:
-                out = await clipper.render(src, clip["words"], clip["edit"], src.parent / f"final_{int(time.time())}.mp4")
+                out = await clipper.render(src, clip["words"], clip["edit"], src.parent / f"final_{int(time.time())}.mp4",
+                                           keywords=self.db.settings()["detect"]["keywords"])
             old = clip.get("path")
             e = clip["edit"]
             thumb = await clipper.thumbnail(out, min(1.5, clipper.output_duration(e) / 2), src.parent / "thumb.jpg")

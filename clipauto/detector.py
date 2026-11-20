@@ -122,14 +122,16 @@ class Detector:
     def add_audio(self, t: float, rms_db: float) -> None:
         self.audio.append((t, rms_db))
 
-    def features(self, now: float) -> dict[str, float]:
+    def features(self, now: float, reaction: float = 0.0) -> dict[str, float]:
+        """Chat sur [now-window, now] ; audio sur la même fenêtre décalée de `reaction` secondes
+        (le chat réagit APRÈS ce qui se passe à l'image : l'audio du moment est plus tôt)."""
         lo, hi = now - self.window, now
         m = [x for x in self.msgs if lo <= x[0] < hi]
-        while self.msgs and self.msgs[0][0] < lo - 120:
+        while self.msgs and self.msgs[0][0] < lo - 180:
             self.msgs.popleft()
-        while self.audio and self.audio[0][0] < lo - 120:
+        while self.audio and self.audio[0][0] < lo - reaction - 180:
             self.audio.popleft()
-        aud = [a for t, a in self.audio if lo <= t < hi]
+        aud = [a for t, a in self.audio if lo - reaction <= t < hi - reaction]
         return {
             "chat_rate": len(m) / self.window,
             "unique_chatters": float(len({x[1] for x in m})),
@@ -139,10 +141,12 @@ class Detector:
             "audio": float(np.percentile(aud, 90)) if aud else float("nan"),
         }
 
-    def step(self, now: float) -> Trigger | None:
+    def step(self, now: float, reaction: float = 0.0) -> Trigger | None:
+        """`now` = heure du chat analysé. Le moment fort à l'image est à `now - reaction`."""
         if self.t_start is None:
             self.t_start = now
-        f = self.features(now)
+        f = self.features(now, reaction)
+        base = {}
         zs, score, wsum = {}, 0.0, 0.0
         for k, w in self.weights.items():
             v = f.get(k, float("nan"))
@@ -150,6 +154,7 @@ class Detector:
                 continue
             hist = np.array(self.hist[k], dtype=float)
             z = robust_z(v, hist, FLOORS.get(k, 1.0))
+            base[k] = round(float(np.median(hist)), 2) if len(hist) else None
             # un mot-clé perso compte même si l'historique est vide (événement rare = fort)
             if k == "keywords" and v > 0 and len(hist) and np.median(hist) == 0:
                 z = max(z, min(2.0 + v, 10.0))
@@ -163,5 +168,9 @@ class Detector:
         if (now - self.t_start >= self.warmup and score >= self.threshold and rising >= self.min_signals
                 and now - self.last_trigger > self.cooldown):
             self.last_trigger = now
-            return Trigger(now, round(score, 2), {"z": zs, "raw": f})
+            curve = [[round(t - now, 1), sc] for t, sc, _ in list(self.timeline)[-30:]]
+            return Trigger(now - reaction, round(score, 2),
+                           {"z": zs, "raw": {k: (None if np.isnan(v) else round(v, 2)) for k, v in f.items()},
+                            "base": base, "threshold": self.threshold, "curve": curve,
+                            "weights": dict(self.weights), "reaction": reaction})
         return None

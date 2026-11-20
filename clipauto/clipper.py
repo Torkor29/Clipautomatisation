@@ -217,8 +217,28 @@ def layout_filter(layout: dict, iw: int, ih: int, inp: str = "0:v", outl: str = 
         bh = OUT_H - th
         top = _crop(layout.get("facecam", {}), iw, ih, OUT_W / th)
         bot = _crop(layout.get("gameplay", {}), iw, ih, OUT_W / bh)
+        if layout.get("cam_position", "top") == "bottom":  # jeu en haut, cam en bas
+            top = _crop(layout.get("facecam", {}), iw, ih, OUT_W / bh)
+            bot = _crop(layout.get("gameplay", {}), iw, ih, OUT_W / th)
+            return (f"[{inp}]split[{outl}a][{outl}b];[{outl}a]{top},scale={OUT_W}:{bh}[{outl}t];"
+                    f"[{outl}b]{bot},scale={OUT_W}:{th}[{outl}g];[{outl}g][{outl}t]vstack,setsar=1[{outl}]")
         return (f"[{inp}]split[{outl}a][{outl}b];[{outl}a]{top},scale={OUT_W}:{th}[{outl}t];[{outl}b]{bot},scale={OUT_W}:{bh}[{outl}g];"
                 f"[{outl}t][{outl}g]vstack,setsar=1[{outl}]")
+    if mode == "pip":  # jeu plein écran + cam incrustée dans un coin
+        size = float(layout.get("pip_size", 0.42))
+        cw = int(OUT_W * size) // 2 * 2
+        fc = layout.get("facecam", {})
+        ch = int(cw * (fc.get("h", .3) * ih) / max(fc.get("w", .3) * iw, 1)) // 2 * 2
+        ch = min(max(ch, 2), OUT_H // 2 // 2 * 2)
+        game = _crop(layout.get("gameplay", {}), iw, ih, OUT_W / OUT_H)
+        cam = _crop(fc, iw, ih, cw / ch)
+        corner = layout.get("pip_corner", "tl")
+        m = 40
+        x = m if corner in ("tl", "bl") else f"W-w-{m}"
+        y = 220 if corner in ("tl", "tr") else f"H-h-{m + 200}"
+        return (f"[{inp}]split[{outl}a][{outl}b];[{outl}a]{game},scale={OUT_W}:{OUT_H}[{outl}g];"
+                f"[{outl}b]{cam},scale={cw}:{ch},pad={cw + 12}:{ch + 12}:6:6:white[{outl}c];"
+                f"[{outl}g][{outl}c]overlay={x}:{y},setsar=1[{outl}]")
     if mode == "fit":
         return (f"[{inp}]scale={OUT_W}:-2,pad={OUT_W}:{OUT_H}:(ow-iw)/2:(oh-ih)/2:black,setsar=1[{outl}]")
     # blur : vidéo entière au centre + fond flouté
@@ -248,7 +268,7 @@ async def has_audio(path: Path) -> bool:
     return bool(out.strip())
 
 
-async def render(source: Path, words: list[dict], edit: dict, out: Path) -> Path:
+async def render(source: Path, words: list[dict], edit: dict, out: Path, keywords: list[str] | None = None) -> Path:
     """Rendu 9:16 : segments (découpes multiples) + effets + transitions xfade + sous-titres karaoké."""
     iw, ih = await probe_size(source)
     audio = await has_audio(source)
@@ -259,7 +279,8 @@ async def render(source: Path, words: list[dict], edit: dict, out: Path) -> Path
         ass = Path(td) / "subs.ass"
         total = output_duration(edit)
         ass.write_text(build_ass(remap_words(words, edit) if edit.get("captions", True) else [], edit["style"],
-                                 offset=0, duration=total, hook=edit.get("hook"), hook_text=edit.get("title", "")),
+                                 offset=0, duration=total, hook=edit.get("hook"), hook_text=edit.get("title", ""),
+                                 layout=edit.get("layout"), keywords=keywords),
                        encoding="utf-8")
         parts = []
         for i, seg in enumerate(tl):
