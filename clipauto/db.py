@@ -24,7 +24,7 @@ DEFAULT_SETTINGS = {
              "snap_to_sentences": True, "language": "fr", "whisper_model": "small", "auto_render": True,
              "min_viral": 35},
     "style": {
-        "preset": "karaoke", "font": "Montserrat Black", "size": 84, "uppercase": True,
+        "preset": "karaoke", "font": "Montserrat Black", "size": 100, "uppercase": True,
         "color": "#FFFFFF", "highlight": "#FFE500", "emphasis_color": "#FF4D4D", "emphasis": True,
         "outline_color": "#000000", "outline": 7, "shadow": 3, "position": 72, "auto_position": True,
         "words_per_line": 3, "pop": True, "max_chars": 18, "clean_punct": True, "remove_fillers": True,

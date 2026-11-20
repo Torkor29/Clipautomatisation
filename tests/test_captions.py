@@ -10,13 +10,26 @@ def test_group_breaks_on_punctuation_and_size():
     assert all(len(l) <= 3 for l in lines)
 
 
-def test_ass_lines_never_overlap():
-    ass = build_ass(W, {"font": "Anton", "size": 80, "color": "#FFFFFF", "highlight": "#FFE500",
-                        "outline_color": "#000000", "words_per_line": 3, "position": 70})
-    ev = [l.split(",")[1:3] for l in ass.splitlines() if l.startswith("Dialogue")]
+def test_ass_never_shows_two_lines_at_once():
+    import re
+    ass = build_ass(W, {"font": "Anton", "size": 80, "words_per_line": 3, "word_anim": "pop", "line_in": "fade"})
     to_s = lambda t: sum(float(x) * m for x, m in zip(t.split(":"), (3600, 60, 1)))
-    spans = sorted((to_s(a), to_s(b)) for a, b in ev)
-    assert all(spans[i][1] <= spans[i + 1][0] + 1e-6 for i in range(len(spans) - 1))
+    ev = []
+    for l in ass.splitlines():
+        if l.startswith("Dialogue") and ",Cap," in l and not l.startswith("Dialogue: 0"):
+            f = l.split(",", 9)
+            pos = re.search(r"\\pos\(([\d.]+),([\d.]+)\)", f[9])
+            ev.append((to_s(f[1]), to_s(f[2]), pos.groups() if pos else None))
+    for t in [x / 10 for x in range(0, 50)]:
+        on = [e for e in ev if e[0] <= t < e[1]]
+        assert len(on) <= 3, (t, on)
+        assert len({e[2] for e in on}) == len(on)  # un seul état par mot à la fois
+
+
+def test_all_presets_render():
+    from clipauto.captions import PRESETS
+    for k, p in PRESETS.items():
+        assert "Dialogue" in build_ass(W, p), k
 
 
 def test_smart_trim_respects_bounds():

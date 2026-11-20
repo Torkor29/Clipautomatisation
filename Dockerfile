@@ -8,6 +8,7 @@ COPY fonts fonts
 RUN mkdir -p /usr/share/fonts/truetype/clipauto && cp fonts/*.ttf /usr/share/fonts/truetype/clipauto/ && fc-cache -f
 COPY clipauto clipauto
 COPY web web
+COPY sfx sfx
 ENV DATA_DIR=/app/data HF_HOME=/app/data/models PYTHONUNBUFFERED=1
 EXPOSE 8000
 CMD ["python", "-m", "clipauto", "web", "--port", "8000"]

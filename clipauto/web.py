@@ -14,7 +14,7 @@ from fastapi import Body, FastAPI, File, Form, HTTPException, Request, UploadFil
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from .captions import FONTS, PRESETS
+from .captions import BASE, FONTS, LINE_ANIMS, PRESETS, SFX, WORD_ANIMS, em_ratio
 from .clipper import EFFECTS, TRANSITIONS
 from .config import load_dotenv
 from .db import DEFAULT_SETTINGS
@@ -89,7 +89,9 @@ def create_app(data_dir: Path | None = None, start_engine: bool = True) -> FastA
     @app.get("/api/meta")
     def meta():
         return {"fonts": list(FONTS), "presets": PRESETS, "defaults": DEFAULT_SETTINGS, "platforms": PLATFORMS,
-                "transitions": TRANSITIONS, "effects": EFFECTS}
+                "transitions": TRANSITIONS, "effects": EFFECTS, "caption_base": BASE,
+                "font_ratio": {f: em_ratio(f) for f in FONTS}, "word_anims": WORD_ANIMS,
+                "line_anims": LINE_ANIMS, "sfx": SFX}
 
     # ------------------------------------------------------------ réglages
     @app.get("/api/settings")
@@ -264,5 +266,6 @@ def create_app(data_dir: Path | None = None, start_engine: bool = True) -> FastA
         return JSONResponse({"detail": str(exc)}, status_code=500)
 
     app.mount("/fonts", StaticFiles(directory=ROOT / "fonts"), name="fonts")
+    app.mount("/sfx", StaticFiles(directory=ROOT / "sfx"), name="sfx")
     app.mount("/", StaticFiles(directory=ROOT / "web", html=True), name="web")
     return app

@@ -415,10 +415,27 @@ async function viewSettings(v) {
 function styleControls(box, st, layout, hook, onChange) {
   const ch = () => onChange();
   box.innerHTML = `
-    <div class="presets">${Object.keys(META.presets).map((k) => `<button data-pr="${k}" style="font-family:'${META.presets[k].font}';color:${META.presets[k].highlight}" class="${st.preset === k ? "on" : ""}">${k.toUpperCase()}</button>`).join("")}</div>
+    <div class="presets">${Object.entries(META.presets).map(([k, p]) => { const q = { ...META.caption_base, ...p }; return `<button data-pr="${k}" title="${esc(p.label)}" class="${st.preset === k ? "on" : ""}"
+      style="font-family:'${q.font}';color:${q.highlight_mode === "box" ? q.highlight_text : q.highlight};${q.highlight_mode === "box" ? `background:${q.highlight};` : ""}${q.box ? `background:${q.box_color};` : ""}${q.glow ? `text-shadow:0 0 8px ${q.glow_color};` : ""}text-transform:${q.uppercase ? "uppercase" : "none"}">${esc(p.label)}</button>`; }).join("")}</div>
+    <h3>Animation</h3>
+    <div class="grid2" style="gap:10px">
+      <label class="f"><b>Mot prononcé</b><select data-s="word_anim">${Object.entries(META.word_anims).map(([k, l]) => `<option value="${k}" ${k === st.word_anim ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+      <label class="f"><b>Apparition des mots</b><select data-s="reveal"><option value="all" ${st.reveal !== "progressive" ? "selected" : ""}>Toute la ligne</option><option value="progressive" ${st.reveal === "progressive" ? "selected" : ""}>Au fur et à mesure</option></select></label>
+      <label class="f"><b>Entrée de ligne</b><select data-s="line_in">${Object.entries(META.line_anims).map(([k, l]) => `<option value="${k}" ${k === st.line_in ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+      <label class="f"><b>Sortie de ligne</b><select data-s="line_out"><option value="none" ${st.line_out !== "fade" ? "selected" : ""}>Aucune</option><option value="fade" ${st.line_out === "fade" ? "selected" : ""}>Fondu</option></select></label>
+      <label class="f"><b>Mot actif</b><select data-s="highlight_mode"><option value="color" ${st.highlight_mode !== "box" ? "selected" : ""}>Couleur</option><option value="box" ${st.highlight_mode === "box" ? "selected" : ""}>Dans une boîte</option></select></label>
+      <label class="f"><b>Bruitage</b><div class="inline"><select data-s="sfx">${Object.entries(META.sfx).map(([k, l]) => `<option value="${k}" ${k === (st.sfx || "none") ? "selected" : ""}>${l}</option>`).join("")}</select>
+        <select data-s="sfx_on"><option value="line" ${st.sfx_on === "line" ? "selected" : ""}>chaque ligne</option><option value="emphasis" ${st.sfx_on === "emphasis" ? "selected" : ""}>mots forts</option><option value="word" ${st.sfx_on === "word" ? "selected" : ""}>chaque mot</option></select>
+        <button class="btn sm" data-sfxplay title="Écouter">🔊</button></div></label>
+    </div>
+    <div class="row" style="margin-bottom:12px">
+      <label class="inline"><input type="checkbox" data-s="glow" ${st.glow ? "checked" : ""}> Halo lumineux</label><input type="color" data-s="glow_color" value="${st.glow_color || "#FF8800"}">
+      <label class="inline">Texte du mot encadré <input type="color" data-s="highlight_text" value="${st.highlight_text || "#000000"}"></label>
+      <label class="inline">Mots pas encore dits <input type="color" data-s="pending_color" value="${st.pending_color || st.color}"></label>
+    </div>
     <div class="grid2" style="gap:10px">
       <label class="f"><b>Police</b><select data-s="font">${META.fonts.map((f) => `<option ${f === st.font ? "selected" : ""} style="font-family:'${f}'">${f}</option>`).join("")}</select></label>
-      <label class="f"><b>Taille <span>${st.size}</span></b><input type="range" min="36" max="130" data-s="size" data-n value="${st.size}"></label>
+      <label class="f"><b>Taille <span>${st.size}</span></b><input type="range" min="40" max="180" data-s="size" data-n value="${st.size}"></label>
       <label class="f"><b>Position verticale <span>${st.position}%</span></b><input type="range" min="10" max="90" data-s="position" data-n value="${st.position}"></label>
       <label class="f"><b>Mots par ligne <span>${st.words_per_line}</span></b><input type="range" min="1" max="7" data-s="words_per_line" data-n value="${st.words_per_line}"></label>
       <label class="f"><b>Contour <span>${st.outline}</span></b><input type="range" min="0" max="14" data-s="outline" data-n value="${st.outline}"></label>
@@ -431,7 +448,6 @@ function styleControls(box, st, layout, hook, onChange) {
     </div>
     <div class="row" style="margin-bottom:14px">
       <label class="inline"><input type="checkbox" data-s="uppercase" ${st.uppercase ? "checked" : ""}> MAJUSCULES</label>
-      <label class="inline"><input type="checkbox" data-s="pop" ${st.pop ? "checked" : ""}> Animation « pop »</label>
       <label class="inline"><input type="checkbox" data-s="clean_punct" ${st.clean_punct !== false ? "checked" : ""}> Sans ponctuation</label>
       <label class="inline"><input type="checkbox" data-s="remove_fillers" ${st.remove_fillers !== false ? "checked" : ""}> Retirer « euh, bah »</label>
     </div>
@@ -452,7 +468,13 @@ function styleControls(box, st, layout, hook, onChange) {
       <label class="inline">pendant <input type="number" step="0.5" style="width:70px" data-hk="seconds" value="${hook.seconds}"> s</label>
       <label class="inline">Texte <input type="color" data-hk="color" value="${hook.color}"></label>
       <label class="inline">Fond <input type="color" data-hk="bg" value="${hook.bg}"></label></div>`;
-  $$("[data-pr]", box).forEach((b) => b.onclick = () => { Object.assign(st, META.presets[b.dataset.pr], { preset: b.dataset.pr }); styleControls(box, st, layout, hook, onChange); ch(); });
+  $$("[data-pr]", box).forEach((b) => b.onclick = () => {
+    const keep = { position: st.position, auto_position: st.auto_position, clean_punct: st.clean_punct, remove_fillers: st.remove_fillers };
+    for (const k of Object.keys(st)) delete st[k];
+    Object.assign(st, META.caption_base, META.presets[b.dataset.pr], keep, { preset: b.dataset.pr }); delete st.label;
+    styleControls(box, st, layout, hook, onChange); ch();
+  });
+  const sp = $("[data-sfxplay]", box); if (sp) sp.onclick = (e) => { e.preventDefault(); if (st.sfx && st.sfx !== "none") new Audio(`/sfx/${st.sfx}.mp3`).play(); };
   $$("[data-s]", box).forEach((i) => i.oninput = () => {
     st[i.dataset.s] = i.type === "checkbox" ? i.checked : i.hasAttribute("data-n") ? Number(i.value) : i.value;
     const lab = i.previousElementSibling?.querySelector?.("span"); if (lab) lab.textContent = i.value + (i.dataset.s === "position" ? "%" : "");
@@ -549,6 +571,8 @@ async function viewEditor(v, id) {
         <button class="btn sm" id="pp">▶︎</button><button class="btn sm" id="rw">⟲ début</button>
         <select id="spd" style="width:auto;padding:5px 8px">${[0.9, 1, 1.1, 1.2, 1.25].map((s) => `<option ${s == E.speed ? "selected" : ""}>${s}</option>`).join("")}</select>
         <span class="time" id="tm"></span></div>
+      <button class="btn" id="trb" style="width:100%;max-width:380px;justify-content:center">📝 Afficher la transcription</button>
+      <div id="trp" class="trp" hidden></div>
       <div class="savebar">
         <button class="btn" id="save">💾 Enregistrer</button>
         <button class="btn pri" id="rend">🎬 Rendu final</button>
@@ -570,7 +594,7 @@ async function viewEditor(v, id) {
   let iw = 1920, ih = 1080, dur = 1;
   const ph = $("#ph"), copies = [];
   const mk = () => { const x = h(`<video muted playsinline preload="auto" src="${src}"></video>`); copies.push(x); return x; };
-  const capEl = h(`<div class="capl"></div>`), hookEl = h(`<div class="hookl"></div>`);
+  const capEl = h(`<div class="capw"></div>`), hookEl = h(`<div class="hookl"></div>`);
 
   function buildStage() {
     ph.innerHTML = ""; copies.length = 0;
@@ -607,31 +631,93 @@ async function viewEditor(v, id) {
       const fg = mk(); const fw = W * (L.mode === "blur" ? (L.zoom || 1) : 1), fh = fw * ih / iw;
       Object.assign(fg.style, { width: `${fw}px`, height: `${fh}px`, left: `${(W - fw) / 2}px`, top: `${(H - fh) / 2}px` }); b.append(fg);
     }
-    ph.append(fx, capEl, hookEl); capEl.style.zIndex = hookEl.style.zIndex = 3;
+    ph.append(fx, capEl, hookEl); capEl.style.zIndex = hookEl.style.zIndex = 3; capKey = "";
     copies.forEach((c) => { c.currentTime = master.currentTime; });
     draw();
   }
 
   /* ---- sous-titres & hook (même logique que le rendu ASS) */
   let lines = [];
+  const mctx = document.createElement("canvas").getContext("2d");
+  let capKey = "", capWords = [], capLineIdx = -1;
+  function capLayout(line, st, k) { // identique à captions.layout_line (Python)
+    const ratio = META.font_ratio[st.font] || 0.64, px = st.size * ratio;
+    mctx.font = `${px}px '${st.font}'`;
+    const texts = line.map((w) => st.uppercase ? w.w.toUpperCase() : w.w);
+    const widths = texts.map((t) => mctx.measureText(t).width);
+    const space = mctx.measureText(" ").width + px * (st.highlight_mode === "box" ? 0.32 : 0.2);
+    const rows = []; let cur = [], cw = 0;
+    widths.forEach((wd, i) => { const add = cur.length ? cw + space + wd : wd; if (cur.length && add > 1080 * 0.86) { rows.push(cur); cur = [i]; cw = wd; } else { cur.push(i); cw = add; } });
+    if (cur.length) rows.push(cur);
+    const rowH = px * 1.25, yc = 1920 * captionY(st, E.layout) / 100, y0 = yc - (rows.length - 1) * rowH / 2;
+    const out = [];
+    rows.forEach((idx, r) => {
+      const total = idx.reduce((a, i) => a + widths[i], 0) + space * (idx.length - 1); let x = 540 - total / 2;
+      for (const i of idx) { out[i] = { text: texts[i], x: (x + widths[i] / 2) * k, y: (y0 + r * rowH) * k, w: widths[i] * k, row: r }; x += widths[i] + space; }
+    });
+    return { pos: out, px: px * k, rows: rows.length };
+  }
+  function drawCaptions(t, k) {
+    const st = { ...META.caption_base, ...E.style };
+    if (E.captions === false) { capEl.innerHTML = ""; capLineIdx = -1; return; }
+    lines = groupWords(prepareWords(words.filter((w) => E.segments.some((g) => w.s >= g.s - 0.01 && w.s < g.e)), st, S.detect.keywords), st.words_per_line, st.max_chars || 18);
+    let li = -1;
+    for (let i = 0; i < lines.length; i++) {
+      const L = lines[i], nx = lines[i + 1], end = Math.min(L.at(-1).e + 0.25, nx ? nx[0].s : 1e9);
+      if (t >= L[0].s && t < end) { li = i; break; }
+    }
+    const key = JSON.stringify([st, li, k, E.layout.mode, E.layout.split_ratio]);
+    if (li < 0) { capEl.innerHTML = ""; capLineIdx = -1; capKey = ""; return; }
+    const L = lines[li];
+    if (key !== capKey) { // (re)construction de la ligne
+      capKey = key;
+      const { pos, px } = capLayout(L, st, k);
+      capEl.innerHTML = ""; capWords = [];
+      Object.assign(capEl.style, { position: "absolute", inset: 0, transform: "none", left: 0, right: 0, top: 0, fontFamily: `'${st.font}'`, fontSize: `${px}px`, lineHeight: 1 });
+      if (st.box) {
+        const a = Math.round((st.box_opacity ?? 70) * 2.55).toString(16).padStart(2, "0");
+        [...new Set(pos.map((p) => p.row))].forEach((r) => {
+          const ps = pos.filter((p) => p.row === r), pad = st.size * 0.14 * 1.6 * k;
+          const x0 = Math.min(...ps.map((p) => p.x - p.w / 2)) - pad, x1 = Math.max(...ps.map((p) => p.x + p.w / 2)) + pad, hh = px * 0.62;
+          capEl.append(h(`<div style="position:absolute;left:${x0}px;top:${ps[0].y - hh}px;width:${x1 - x0}px;height:${hh * 2}px;border-radius:${st.size * 0.25 * k}px;background:${st.box_color}${a}"></div>`));
+        });
+      }
+      pos.forEach((p, i) => {
+        const el = h(`<span class="cw">${esc(p.text)}</span>`);
+        Object.assign(el.style, { left: `${p.x}px`, top: `${p.y}px`,
+          WebkitTextStroke: st.outline ? `${st.outline * 2 * k}px ${st.outline_color}` : "0",
+          textShadow: [st.shadow ? `${st.shadow * k}px ${st.shadow * k}px ${2 * k}px #000000aa` : "", st.glow ? `0 0 ${10 * k}px ${st.glow_color}, 0 0 ${22 * k}px ${st.glow_color}` : ""].filter(Boolean).join(",") || "none",
+          padding: st.highlight_mode === "box" ? `0 ${st.size * 0.14 * 1.2 * k}px` : "0", borderRadius: `${st.size * 0.2 * k}px` });
+        capEl.append(el); capWords.push({ el, w: L[i], state: "" });
+      });
+      if (li !== capLineIdx && st.reveal !== "progressive") {
+        const anim = { fade: [{ opacity: 0 }, { opacity: 1 }], slide_up: [{ transform: `translateY(${50 * k}px)`, opacity: 0 }, { transform: "none", opacity: 1 }],
+          slide_left: [{ transform: `translateX(${90 * k}px)`, opacity: 0 }, { transform: "none", opacity: 1 }], zoom: [{ transform: "scale(.7)", opacity: .3 }, { transform: "none", opacity: 1 }] }[st.line_in];
+        if (anim) capEl.animate(anim, { duration: 200, easing: "ease-out" });
+      }
+      capLineIdx = li;
+    }
+    const wa = st.word_anim;
+    capWords.forEach((cw, i) => {
+      const nxt = i + 1 < L.length ? L[i + 1].s : 1e9;
+      const state = t < cw.w.s ? "pend" : t < nxt ? "act" : "done";
+      if (state === cw.state) return;
+      cw.state = state; const el = cw.el;
+      el.style.visibility = state === "pend" && st.reveal === "progressive" ? "hidden" : "visible";
+      el.style.background = state === "act" && st.highlight_mode === "box" ? st.highlight : "transparent";
+      el.style.color = state === "act" ? (st.highlight_mode === "box" ? st.highlight_text : st.highlight)
+        : cw.w.x ? st.emphasis_color : state === "pend" ? (st.pending_color || st.color) : st.color;
+      if (state === "act") {
+        const kf = { pop: [{ transform: "translate(-50%,-50%) scale(1)" }, { transform: "translate(-50%,-50%) scale(1.16)", offset: .45 }, { transform: "translate(-50%,-50%) scale(1.08)" }],
+          zoom: [{ transform: "translate(-50%,-50%) scale(.45)" }, { transform: "translate(-50%,-50%) scale(1.15)", offset: .58 }, { transform: "translate(-50%,-50%) scale(1.04)" }],
+          bounce: [{ transform: "translate(-50%,-30%) scale(1)" }, { transform: "translate(-50%,-50%) scale(1.12)", offset: .5 }, { transform: "translate(-50%,-50%) scale(1.04)" }] }[wa];
+        if (kf) el.animate(kf, { duration: wa === "zoom" ? 190 : 170, fill: "forwards", easing: "ease-out" });
+      } else { el.getAnimations().forEach((x) => x.cancel()); }
+    });
+  }
   function draw() {
     const st = E.style, k = ph.clientWidth / 1080, t = master.currentTime - shift;
-    lines = groupWords(prepareWords(words.filter((w) => E.segments.some((g) => w.s >= g.s - 0.01 && w.s < g.e)), st, S.detect.keywords), st.words_per_line, st.max_chars || 18);
-    let html = "";
-    for (const L of lines) {
-      const nx = lines[lines.indexOf(L) + 1], end = Math.min(L.at(-1).e + 0.15, nx ? nx[0].s : 1e9);
-      if (t >= L[0].s && t < end) {
-        const ai = L.findIndex((w, i) => t >= w.s && (i + 1 >= L.length || t < L[i + 1].s));
-        html = L.map((w, i) => { const tx = esc(st.uppercase ? w.w.trim().toUpperCase() : w.w.trim()); return i === ai ? `<span style="color:${st.highlight};${st.pop ? "transform:scale(1.1)" : ""}">${tx}</span>` : `<span ${w.x ? `style="color:${st.emphasis_color || st.highlight}"` : ""}>${tx}</span>`; }).join(" ");
-        if (st.box) { const a = Math.round((st.box_opacity ?? 70) * 2.55).toString(16).padStart(2, "0"); html = `<span class="boxl" style="background:${st.box_color || "#000"}${a}">${html}</span>`; }
-        break;
-      }
-    }
-    Object.assign(capEl.style, {
-      top: `${captionY(st, E.layout)}%`, fontFamily: `'${st.font}'`, fontSize: `${st.size * k}px`, color: st.color, letterSpacing: `${k}px`,
-      WebkitTextStroke: st.box ? "0" : `${st.outline * 2 * k}px ${st.outline_color}`, textShadow: st.shadow && !st.box ? `${st.shadow * k}px ${st.shadow * k}px ${2 * k}px #00000099` : "none",
-    });
-    capEl.innerHTML = E.captions === false ? "" : html;
+    drawCaptions(t, k);
     const hk = E.hook, showH = hk.enabled && E.title && segAt(master.currentTime) >= 0 && outTime(master.currentTime) < hk.seconds;
     Object.assign(hookEl.style, { top: `${170 * k}px`, fontFamily: `'${st.font}'`, fontSize: `${(hk.size || 72) * k}px`, color: hk.color });
     hookEl.innerHTML = showH ? `<span style="background:${hk.bg}">${esc(E.title)}</span>` : "";
@@ -979,6 +1065,37 @@ async function viewEditor(v, id) {
       e.target.disabled = false; e.target.textContent = "📤 Publier maintenant";
     };
   }
+
+  /* ---- transcription éditable (phrases) */
+  function sentencesOf() {
+    const out = []; let cur = [];
+    words.forEach((w, i) => { cur.push(i); if (/[.?!]$/.test(w.w.trim()) || (words[i + 1] && words[i + 1].s - w.e > 0.8)) { out.push(cur); cur = []; } });
+    if (cur.length) out.push(cur); return out;
+  }
+  function renderTranscript() {
+    const box = $("#trp"); box.innerHTML = "";
+    box.append(h(`<small style="color:var(--mute)">Clique dans une phrase pour corriger. Les mots grisés sont hors du clip. Entrée = valider.</small>`));
+    for (const idx of sentencesOf()) {
+      const s0 = words[idx[0]], inClip = E.segments.some((g) => s0.s >= g.s - 0.01 && s0.s < g.e);
+      const el = h(`<p class="trs ${inClip ? "" : "out"}" contenteditable="true" spellcheck="true"><span class="tt">${fmt(s0.s)}</span>${esc(idx.map((i) => words[i].w).join(" "))}</p>`);
+      el.dataset.first = idx[0]; el.dataset.n = idx.length;
+      el.onfocus = () => { seek(s0.s - 0.05); };
+      el.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); el.blur(); } };
+      el.onblur = () => {
+        const txt = el.textContent.replace(/^\d+:\d{2}/, "").trim(), toks = txt.split(/\s+/).filter(Boolean);
+        const old = idx.map((i) => words[i]); if (toks.join(" ") === old.map((w) => w.w).join(" ")) return;
+        let nw;
+        if (toks.length === old.length) nw = old.map((w, j) => ({ ...w, w: toks[j] }));
+        else { // nombre de mots différent : on répartit la durée de la phrase selon la longueur des mots
+          const a = old[0].s, b = old.at(-1).e, L = toks.reduce((x, t) => x + t.length + 1, 0); let t = a;
+          nw = toks.map((tk) => { const d = (b - a) * (tk.length + 1) / L, w = { w: tk, s: +t.toFixed(3), e: +(t + d * 0.92).toFixed(3) }; t += d; return w; });
+        }
+        words.splice(idx[0], idx.length, ...nw); mark(); renderTranscript(); toast("Transcription corrigée ✏️");
+      };
+      box.append(el);
+    }
+  }
+  $("#trb").onclick = () => { const p = $("#trp"); p.hidden = !p.hidden; $("#trb").textContent = p.hidden ? "📝 Afficher la transcription" : "📝 Masquer la transcription"; if (!p.hidden) renderTranscript(); };
 
   /* ---- sauvegarde & rendu */
   async function saveEdit() {

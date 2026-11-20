@@ -10,7 +10,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .captions import build_ass
+from .captions import build_ass, full_style, sfx_times
 from .recorder import Segment
 
 log = logging.getLogger(__name__)
@@ -278,7 +278,15 @@ async def render(source: Path, words: list[dict], edit: dict, out: Path, keyword
     with tempfile.TemporaryDirectory() as td:
         ass = Path(td) / "subs.ass"
         total = output_duration(edit)
-        ass.write_text(build_ass(remap_words(words, edit) if edit.get("captions", True) else [], edit["style"],
+        rwords = remap_words(words, edit) if edit.get("captions", True) else []
+        sfx_wav = None
+        st = full_style(edit["style"])
+        if audio and rwords and st.get("sfx", "none") != "none":
+            ts = sfx_times(rwords, st, keywords)
+            if ts:
+                sfx_wav = Path(td) / "sfx.wav"
+                await asyncio.to_thread(_sfx_track, st["sfx"], ts, total, float(st.get("sfx_volume", 35)) / 100, sfx_wav)
+        ass.write_text(build_ass(rwords, edit["style"],
                                  offset=0, duration=total, hook=edit.get("hook"), hook_text=edit.get("title", ""),
                                  layout=edit.get("layout"), keywords=keywords),
                        encoding="utf-8")
@@ -307,13 +315,42 @@ async def render(source: Path, words: list[dict], edit: dict, out: Path, keyword
                     parts.append(f"[{acur}][a{i}]concat=n=2:v=0:a=1[ax{i}]")
             vcur, acur = f"vx{i}", f"ax{i}"
         parts.append(f"[{vcur}]ass={ass}:fontsdir={FONTS_DIR}[out]")
+        extra = []
+        if sfx_wav:
+            extra = ["-i", str(sfx_wav)]
+            parts.append(f"[{acur}][1:a]amix=inputs=2:duration=first:normalize=0[amx]")
+            acur = "amx"
         amap = ["-map", f"[{acur}]"] if audio else []
-        await run("ffmpeg", "-loglevel", "error", "-y", "-i", str(source), "-filter_complex", ";".join(parts),
+        await run("ffmpeg", "-loglevel", "error", "-y", "-i", str(source), *extra, "-filter_complex", ";".join(parts),
                   "-map", "[out]", *amap, "-c:v", "libx264", "-preset", "faster", "-crf", "20",
                   "-pix_fmt", "yuv420p", "-r", "30", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart",
                   str(out))
     log.info("rendu: %s", out)
     return out
+
+
+SFX_DIR = Path(__file__).resolve().parent.parent / "sfx"
+
+
+def _sfx_track(name: str, times: list[float], total: float, vol: float, out: Path) -> None:
+    """Piste de bruitages (48 kHz stéréo) : le son `name` posé à chaque instant de `times`."""
+    import wave
+    src = SFX_DIR / f"{name}.mp3"
+    pcm = subprocess.run(["ffmpeg", "-loglevel", "error", "-i", str(src), "-ac", "2", "-ar", "48000", "-f", "s16le",
+                          "pipe:1"], capture_output=True, check=True).stdout
+    clip = np.frombuffer(pcm, np.int16).reshape(-1, 2).astype(np.float32) * vol
+    n = int((total + 1) * 48000)
+    track = np.zeros((n, 2), np.float32)
+    for t in times:
+        i = int(t * 48000)
+        if 0 <= i < n:
+            j = min(n, i + len(clip))
+            track[i:j] += clip[: j - i]
+    with wave.open(str(out), "wb") as w:
+        w.setnchannels(2)
+        w.setsampwidth(2)
+        w.setframerate(48000)
+        w.writeframes(np.clip(track, -32768, 32767).astype(np.int16).tobytes())
 
 
 async def normalize_part(src: Path, t0: float, t1: float, out: Path) -> Path:
