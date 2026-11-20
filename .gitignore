@@ -5,3 +5,4 @@ config.yaml
 data/
 *.ts
 *.mp4
+web/fonts/

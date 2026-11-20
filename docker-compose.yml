@@ -8,3 +8,22 @@ services:
       - "8000:8000"
     volumes:
       - ./data:/app/data
+
+  # HTTPS automatique (Let's Encrypt) pour que le front Vercel puisse parler au VPS.
+  # Activé seulement avec : docker compose --profile https up -d   (DOMAIN dans .env)
+  # ⚠️ utilise les ports 80 et 443 : si un autre site (nginx…) les occupe déjà, voir README.
+  caddy:
+    image: caddy:2
+    profiles: ["https"]
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    command: caddy reverse-proxy --from ${DOMAIN:?mets DOMAIN dans .env} --to clipauto:8000
+    volumes:
+      - caddy_data:/data
+    depends_on:
+      - clipauto
+
+volumes:
+  caddy_data:

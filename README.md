@@ -40,3 +40,11 @@ web/                  interface (HTML/CSS/JS sans build)
 fonts/                polices OFL (Montserrat, Poppins, Anton, Bangers, Bebas Neue)
 ```
 Analyse des projets open source étudiés : `docs/ANALYSE-OPEN-SOURCE.md`.
+
+## Front sur Vercel, moteur sur le VPS
+1. VPS — dans `.env` : `APP_PASSWORD=…`, `DOMAIN=<ip-avec-tirets>.sslip.io` (ou ton domaine), `CORS_ORIGINS=https://<ton-projet>.vercel.app`
+   puis `docker compose --profile https up -d --build` (Caddy obtient le certificat HTTPS tout seul ; ports 80/443 ouverts).
+   Si les ports 80/443 sont déjà pris par un autre site (nginx), ajoute plutôt un bloc `proxy_pass http://127.0.0.1:8000;`
+   pour ce domaine dans ta config nginx + `certbot --nginx`.
+2. Vercel — importe le dépôt, variable d'environnement `CLIPAUTO_API=https://<DOMAIN>` ; le reste est dans `vercel.json`.
+3. Ouvre l'adresse Vercel, entre le mot de passe : c'est tout.

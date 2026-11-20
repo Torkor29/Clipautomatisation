@@ -9,12 +9,35 @@ const fmt = (s) => { s = Math.max(0, s || 0); return `${Math.floor(s / 60)}:${St
 const clamp = (v, a, b) => Math.min(Math.max(v, a), b);
 const deep = (o) => JSON.parse(JSON.stringify(o));
 
+/* Le front peut être servi par le VPS (même adresse) OU par Vercel : dans ce cas
+   window.CLIPAUTO_API (web/config.js) = adresse https du VPS. Connexion par mot de passe (jeton). */
+const API = (window.CLIPAUTO_API || "").replace(/\/+$/, "");
+let TOKEN = (() => { try { return localStorage.getItem("clipauto_token") || ""; } catch { return ""; } })();
+let MB = TOKEN ? `${API}/t/${encodeURIComponent(TOKEN)}` : API; // base des médias (img / video ne peuvent pas envoyer d'en-tête)
 async function api(path, opts = {}) {
-  const o = { ...opts };
-  if (o.json !== undefined) { o.body = JSON.stringify(o.json); o.headers = { "Content-Type": "application/json" }; delete o.json; }
-  const r = await fetch(path, o);
+  const o = { ...opts, headers: { ...(opts.headers || {}) } };
+  if (o.json !== undefined) { o.body = JSON.stringify(o.json); o.headers["Content-Type"] = "application/json"; delete o.json; }
+  if (TOKEN) o.headers.Authorization = `Bearer ${TOKEN}`;
+  let r;
+  try { r = await fetch(API + path, o); } catch (e) { throw new Error(API ? `Serveur injoignable (${API})` : "Serveur injoignable"); }
+  if (r.status === 401) { showLogin(); throw new Error("Connexion requise"); }
   if (!r.ok) { let m = r.statusText; try { m = (await r.json()).detail || m; } catch { } throw new Error(m); }
   return r.status === 204 ? null : r.json();
+}
+function showLogin() {
+  if ($("#login")) return;
+  const m = h(`<div class="modal" id="login"><div class="card" style="width:min(380px,100%)"><div class="brand" style="padding:0 0 14px"><span class="logo">▶</span> ClipAuto</div>
+    <label class="f"><b>Mot de passe</b><input type="password" id="lpw" autocomplete="current-password"></label>
+    <button class="btn pri" id="lgo" style="width:100%;justify-content:center">Se connecter</button>
+    <small style="color:var(--mute);display:block;margin-top:10px">${API ? `Serveur : ${esc(API)}` : ""}</small></div></div>`);
+  document.body.append(m);
+  const go = async () => {
+    const pw = $("#lpw", m).value;
+    const r = await fetch(API + "/api/meta", { headers: { Authorization: `Bearer ${pw}` } }).catch(() => null);
+    if (r && r.ok) { try { localStorage.setItem("clipauto_token", pw); } catch { } location.reload(); }
+    else toast(r ? "Mot de passe incorrect" : "Serveur injoignable");
+  };
+  $("#lgo", m).onclick = go; $("#lpw", m).onkeydown = (e) => e.key === "Enter" && go(); $("#lpw", m).focus();
 }
 function toast(msg, ms = 2600) {
   const d = h(`<div>${esc(msg)}</div>`); $("#toast").append(d); setTimeout(() => d.remove(), ms);
@@ -31,7 +54,7 @@ async function route() {
   const [name, arg] = (location.hash.replace(/^#\//, "") || "clips").split("/");
   $$("nav a").forEach((a) => a.classList.toggle("on", a.dataset.r === name || (name === "edit" && a.dataset.r === "clips")));
   const v = $("#view"); v.innerHTML = "";
-  if (!META) META = await api("/api/meta");
+  if (!META) { try { META = await api("/api/meta"); } catch (e) { v.append(h(`<div class="empty">${esc(e.message)}</div>`)); return; } }
   try { await (routes[name] || viewClips)(v, arg); } catch (e) { v.append(h(`<div class="empty">Erreur : ${esc(e.message)}</div>`)); }
 }
 window.addEventListener("hashchange", route);
@@ -96,7 +119,7 @@ function clipCard(c, reload) {
   const rendering = ["rendering", "queued"].includes(c.render_status);
   const el = h(`<div class="clipc">
     <div class="thumb">
-      ${c.thumb ? `<img loading="lazy" src="/media/${c.id}/thumb?v=${c.render_status}">` : ""}
+      ${c.thumb ? `<img loading="lazy" src="${MB}/media/${c.id}/thumb?v=${c.render_status}">` : ""}
       <div class="score ${cls}">${sc}<small>VIRAL</small></div>
       <div class="dur">${fmt(c.duration)}</div>
       ${rendering ? `<div class="rstat">⏳ rendu en cours…</div>` : ""}
@@ -111,14 +134,14 @@ function clipCard(c, reload) {
         <a class="btn sm" href="#/edit/${c.id}" title="Éditer">✂️</a>
         <button class="btn sm ok" data-a="approve" title="Approuver">✅</button>
         <button class="btn sm bad" data-a="reject" title="Rejeter">✖</button>
-        ${c.path ? `<a class="btn sm" href="/media/${c.id}/final?dl=1" title="Télécharger">⬇️</a>` : ""}
+        ${c.path ? `<a class="btn sm" href="${MB}/media/${c.id}/final?dl=1" title="Télécharger">⬇️</a>` : ""}
       </div>
     </div></div>`);
   const th = $(".thumb", el);
   th.onclick = () => location.hash = `#/edit/${c.id}`;
   if (c.path && !rendering) {
     let vid;
-    th.onmouseenter = () => { vid = h(`<video muted loop playsinline src="/media/${c.id}/final"></video>`); vid.style.position = "absolute"; vid.style.inset = 0; th.append(vid); vid.play().catch(() => { }); };
+    th.onmouseenter = () => { vid = h(`<video muted loop playsinline src="${MB}/media/${c.id}/final"></video>`); vid.style.position = "absolute"; vid.style.inset = 0; th.append(vid); vid.play().catch(() => { }); };
     th.onmouseleave = () => vid && vid.remove();
   }
   $$("[data-a]", el).forEach((b) => b.onclick = async () => { await api(`/api/clips/${c.id}/${b.dataset.a}`, { method: "POST" }); toast(b.dataset.a === "approve" ? "Clip approuvé ✅" : "Clip rejeté"); reload(); });
@@ -161,7 +184,7 @@ async function compilationModal(opts, done) {
     ids.forEach((id, i) => {
       const c = byId[id] || {};
       const why = clipWhy(c);
-      const row = h(`<div><b>${i + 1}</b>${c.thumb ? `<img src="/media/${id}/thumb">` : ""}<span class="ordt"><b>${esc(c.title || "#" + id)}</b> · ${fmt(c.duration)} · ${c.detail?.viral != null ? `score ${c.detail.viral}/100` : ""}
+      const row = h(`<div><b>${i + 1}</b>${c.thumb ? `<img src="${MB}/media/${id}/thumb">` : ""}<span class="ordt"><b>${esc(c.title || "#" + id)}</b> · ${fmt(c.duration)} · ${c.detail?.viral != null ? `score ${c.detail.viral}/100` : ""}
         <small>${new Date(c.created * 1000).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })} — ${esc(why || "pas de détail (clip ancien)")}</small></span>
         <button class="btn sm" data-u ${i ? "" : "disabled"}>↑</button><button class="btn sm" data-d ${i < ids.length - 1 ? "" : "disabled"}>↓</button><button class="btn sm bad" data-r>✖</button></div>`);
       $("[data-u]", row).onclick = () => { [ids[i - 1], ids[i]] = [ids[i], ids[i - 1]]; drawOrd(); };
@@ -488,7 +511,7 @@ function styleControls(box, st, layout, hook, onChange) {
     Object.assign(st, META.caption_base, META.presets[b.dataset.pr], keep, { preset: b.dataset.pr }); delete st.label;
     styleControls(box, st, layout, hook, onChange); ch();
   });
-  const sp = $("[data-sfxplay]", box); if (sp) sp.onclick = (e) => { e.preventDefault(); if (st.sfx && st.sfx !== "none") new Audio(`/sfx/${st.sfx}.mp3`).play(); };
+  const sp = $("[data-sfxplay]", box); if (sp) sp.onclick = (e) => { e.preventDefault(); if (st.sfx && st.sfx !== "none") new Audio(`${MB}/sfx/${st.sfx}.mp3`).play(); };
   $$("[data-s]", box).forEach((i) => i.oninput = () => {
     st[i.dataset.s] = i.type === "checkbox" ? i.checked : i.hasAttribute("data-n") ? Number(i.value) : i.value;
     const lab = i.previousElementSibling?.querySelector?.("span"); if (lab) lab.textContent = i.value + (i.dataset.s === "position" ? "%" : "");
@@ -617,7 +640,7 @@ async function viewEditor(v, id) {
   if (!clip.detail?.title_options) api(`/api/clips/${clip.id}/titles`).then(showTitles).catch(() => { });
 
   /* ---- lecteurs vidéo (un maître avec le son + des copies muettes pour les calques) */
-  const src = `/media/${clip.id}/source`;
+  const src = `${MB}/media/${clip.id}/source`;
   const master = h(`<video preload="auto" playsinline src="${src}"></video>`);
   master.style.display = "none"; ed.append(master);
   let iw = 1920, ih = 1080, dur = 1;
@@ -840,13 +863,13 @@ async function viewEditor(v, id) {
         WebkitTextStroke: o.outline ? `${o.outline * 2 * k}px ${o.outline_color || "#000"}` : "0", textShadow: o.shadow ? `${o.shadow * k}px ${o.shadow * k}px ${2 * k}px #000a` : "none",
         background: o.bg ? o.bg + Math.round((o.bg_opacity ?? 100) * 2.55).toString(16).padStart(2, "0") : "transparent", padding: o.bg ? `${px * .3}px ${px * .35}px` : "0", borderRadius: `${px * .3}px` });
     } else if (o.type === "video") {
-      el = h(`<div class="om"><video playsinline preload="auto" src="/assets/${encodeURIComponent(o.src.slice(6))}"></video></div>`);
+      el = h(`<div class="om"><video playsinline preload="auto" src="${MB}/assets/${encodeURIComponent(o.src.slice(6))}"></video></div>`);
       $("video", el).muted = !!o.muted; $("video", el).volume = clamp((o.volume ?? 100) / 100, 0, 1);
     } else if (o.type === "audio") {
-      el = h(`<div class="oa" hidden><audio preload="auto" src="${o.src.startsWith("sfx:") ? `/sfx/${o.src.slice(4)}.mp3` : `/assets/${encodeURIComponent(o.src.slice(6))}`}"></audio></div>`);
+      el = h(`<div class="oa" hidden><audio preload="auto" src="${o.src.startsWith("sfx:") ? `${MB}/sfx/${o.src.slice(4)}.mp3` : `${MB}/assets/${encodeURIComponent(o.src.slice(6))}`}"></audio></div>`);
       $("audio", el).volume = clamp((o.volume ?? 100) / 100, 0, 1);
     } else {
-      const url = o.type === "emoji" ? `/api/emoji?c=${encodeURIComponent(o.emoji || "😂")}` : `/assets/${encodeURIComponent(o.src.slice(6))}`;
+      const url = o.type === "emoji" ? `${MB}/api/emoji?c=${encodeURIComponent(o.emoji || "😂")}` : `${MB}/assets/${encodeURIComponent(o.src.slice(6))}`;
       el = h(`<div class="om"><img draggable="false" src="${url}"></div>`);
     }
     if (o.type !== "audio") {
@@ -1054,7 +1077,7 @@ async function viewEditor(v, id) {
       const list = await api("/api/assets"), box = $("#mll", m);
       box.innerHTML = list.length ? "" : `<div style="color:var(--mute)">Aucun média pour l'instant.</div>`;
       for (const a of list) {
-        const prev = a.kind === "image" ? `<img src="/assets/${encodeURIComponent(a.name)}">` : a.kind === "video" ? `<video muted src="/assets/${encodeURIComponent(a.name)}#t=1"></video>` : `<div class="mi">🎵</div>`;
+        const prev = a.kind === "image" ? `<img src="${MB}/assets/${encodeURIComponent(a.name)}">` : a.kind === "video" ? `<video muted src="${MB}/assets/${encodeURIComponent(a.name)}#t=1"></video>` : `<div class="mi">🎵</div>`;
         const it = h(`<div class="mitem">${prev}<span>${esc(a.name)}</span><small>${a.kind}${a.duration ? ` · ${fmt(a.duration)}` : ""}</small><button class="btn sm bad" title="Supprimer">🗑</button></div>`);
         it.onclick = (e) => { if (e.target.closest("button")) return; add(a); };
         $("button", it).onclick = async () => { if (confirm(`Supprimer ${a.name} ?`)) { await api(`/api/assets/${encodeURIComponent(a.name)}`, { method: "DELETE" }); load(); } };
@@ -1063,7 +1086,7 @@ async function viewEditor(v, id) {
     }
     for (const [k, l] of Object.entries(META.sfx)) if (k !== "none") {
       const it = h(`<div class="mitem"><div class="mi">🔊</div><span>${l}</span><button class="btn sm" title="Écouter">▶︎</button></div>`);
-      it.onclick = (e) => { if (e.target.closest("button")) { new Audio(`/sfx/${k}.mp3`).play(); return; } add({ kind: "audio", name: k, sfx: true }); };
+      it.onclick = (e) => { if (e.target.closest("button")) { new Audio(`${MB}/sfx/${k}.mp3`).play(); return; } add({ kind: "audio", name: k, sfx: true }); };
       $("#mls", m).append(it);
     }
     let player = null;
@@ -1499,7 +1522,7 @@ async function viewEditor(v, id) {
     const ob = $("#outbar"); if (!ob) return;
     if (["rendering", "queued"].includes(c.render_status)) { ob.innerHTML = `<span class="pill pending">⏳ rendu en cours…</span>`; setTimeout(pollRender, 2500); return; }
     ob.innerHTML = c.render_status === "done" && c.path
-      ? `<a class="btn sm" target="_blank" href="/media/${c.id}/final?v=${Date.now()}">👁 Voir le rendu</a><a class="btn sm" href="/media/${c.id}/final?dl=1">⬇️ Télécharger MP4</a>`
+      ? `<a class="btn sm" target="_blank" href="${MB}/media/${c.id}/final?v=${Date.now()}">👁 Voir le rendu</a><a class="btn sm" href="${MB}/media/${c.id}/final?dl=1">⬇️ Télécharger MP4</a>`
       : c.render_status === "error" ? `<span class="pill error" title="${esc(c.error)}">⚠️ échec du rendu</span>` : "";
   }
   pollRender();

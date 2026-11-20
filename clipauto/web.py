@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import asyncio
+import re
+from urllib.parse import unquote
 import base64
 import logging
 import os
@@ -48,20 +50,41 @@ def create_app(data_dir: Path | None = None, start_engine: bool = True) -> FastA
     app.state.engine = eng
     password = os.environ.get("APP_PASSWORD")
 
+    # front sur Vercel → appels depuis une autre origine (CORS). L'accès est protégé par le jeton.
+    from fastapi.middleware.cors import CORSMiddleware
+    origins = [o.strip() for o in os.environ.get("CORS_ORIGINS", "*").split(",") if o.strip()]
+    PUBLIC = ("/api/health",)
+
     @app.middleware("http")
     async def auth(request: Request, call_next):
-        if password:
+        path = request.scope["path"]
+        tok = None
+        m = re.match(r"^/t/([^/]+)(/.*)$", path)  # médias : /t/<jeton>/media/... (img/video sans en-tête)
+        if m:
+            tok = unquote(m.group(1))
+            request.scope["path"] = m.group(2)
+            request.scope["raw_path"] = m.group(2).encode()
+            path = m.group(2)
+        protected = path.startswith(("/api/", "/media/", "/assets/")) and path not in PUBLIC
+        if password and protected and request.method != "OPTIONS":
             h = request.headers.get("authorization", "")
-            ok = False
-            if h.startswith("Basic "):
+            if h.startswith("Bearer "):
+                tok = h[7:]
+            elif h.startswith("Basic "):
                 try:
-                    _, pw = base64.b64decode(h[6:]).decode().split(":", 1)
-                    ok = secrets.compare_digest(pw, password)
+                    tok = base64.b64decode(h[6:]).decode().split(":", 1)[1]
                 except Exception:
-                    ok = False
-            if not ok:
-                return Response(status_code=401, headers={"WWW-Authenticate": 'Basic realm="ClipAuto"'})
+                    tok = None
+            if not tok or not secrets.compare_digest(tok, password):
+                return JSONResponse({"detail": "Connexion requise"}, status_code=401)
         return await call_next(request)
+
+    app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["*"], allow_headers=["*"],
+                       expose_headers=["Content-Range", "Accept-Ranges", "Content-Length"])
+
+    @app.get("/api/health")
+    def health():
+        return {"ok": True}
 
     def clip_or_404(cid: int) -> dict:
         c = eng.db.clip(cid)
