@@ -237,7 +237,8 @@ class Engine:
                 layout["facecam"] = fc["facecam"]
                 detail["facecam"] = fc
         min_v = int(c.get("min_viral", 0) or 0)
-        rejected = viral < min_v
+        # un import est une demande explicite : on garde tout (le score reste visible) ; seuls les clips live sont filtrés
+        rejected = viral < min_v and origin == "live"
         thumb = await clipper.thumbnail(src, min(peak, total - 0.5), src.parent / "thumb.jpg")
         cid = self.db.add_clip(streamer=streamer, platform=platform, source=str(src), thumb=str(thumb),
                                score=score, detail=detail, transcript=" ".join(w["w"] for w in kept),
