@@ -25,7 +25,11 @@ async function api(path, opts = {}) {
   let r;
   try { r = await fetch(API + path, o); } catch (e) { throw new Error(API ? `Serveur injoignable (${API})` : "Serveur injoignable"); }
   if (r.status === 401) { showLogin(); throw new Error("Connexion requise"); }
-  if (!r.ok) { let m = r.statusText; try { m = (await r.json()).detail || m; } catch { } throw new Error(m); }
+  if (!r.ok) {
+    let m = ""; try { m = (await r.json()).detail || ""; } catch { }
+    if (!m) m = r.status >= 500 ? `le serveur a planté (${r.status}) sur ${path.split("?")[0]} — redémarrage en cours ? réessaie dans 30 s` : `erreur ${r.status} sur ${path.split("?")[0]}`;
+    throw new Error(m);
+  }
   return r.status === 204 ? null : r.json();
 }
 function showLogin() {
