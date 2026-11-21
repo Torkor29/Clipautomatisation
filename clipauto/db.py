@@ -16,7 +16,7 @@ DEFAULT_SETTINGS = {
     "poll_seconds": 120,
     "record": {"quality": "1080p60,1080p,720p60,720p,best", "segment_seconds": 10, "buffer_minutes": 15},
     "detect": {
-        "window_seconds": 10, "baseline_minutes": 10, "threshold": 2.0, "min_signals": 2,
+        "window_seconds": 10, "baseline_minutes": 10, "threshold": 2.6, "min_signals": 2,
         "cooldown_seconds": 90, "warmup_seconds": 120, "chat_delay_seconds": 8,
         "weights": dict(DEFAULT_WEIGHTS),
         "laugh_words": list(DEFAULT_LAUGH), "hype_words": list(DEFAULT_HYPE), "keywords": [],
@@ -50,13 +50,13 @@ DEFAULT_SETTINGS = {
 # Profils de détection : 3 réglages tout faits. Un streamer peut suivre le profil global ou en choisir un.
 PROFILES = {
     "prudent": {"label": "Prudent", "desc": "Peu de clips, seulement les très gros moments. Idéal pour les gros streamers au chat très actif.",
-                "detect": {"threshold": 2.8, "min_signals": 2, "cooldown_seconds": 150, "max_clips_per_hour": 6},
+                "detect": {"threshold": 4.0, "min_signals": 2, "cooldown_seconds": 150, "max_clips_per_hour": 6},
                 "clip": {"min_viral": 50}},
     "equilibre": {"label": "Équilibré", "desc": "Recommandé. Les moments où le chat et le son s'emballent vraiment ensemble.",
-                  "detect": {"threshold": 2.0, "min_signals": 2, "cooldown_seconds": 90, "max_clips_per_hour": 12},
+                  "detect": {"threshold": 2.6, "min_signals": 2, "cooldown_seconds": 90, "max_clips_per_hour": 12},
                   "clip": {"min_viral": 35}},
     "genereux": {"label": "Généreux", "desc": "Beaucoup de clips, à trier ensuite. Utile pour les petits streamers ou un premier test.",
-                 "detect": {"threshold": 1.4, "min_signals": 1, "cooldown_seconds": 60, "max_clips_per_hour": 20},
+                 "detect": {"threshold": 1.8, "min_signals": 1, "cooldown_seconds": 60, "max_clips_per_hour": 20},
                  "clip": {"min_viral": 20}},
 }
 
@@ -118,6 +118,11 @@ class DB:
                 except sqlite3.IntegrityError:  # doublon : on supprime le mauvais
                     self.c.execute("DELETE FROM streamers WHERE id=?", (r["id"],))
         self.c.commit()
+
+        # migration : réglages d'avant les profils (seuils calibrés pour l'ancien calcul) → profil Équilibré
+        r = self.c.execute("SELECT data FROM settings WHERE id=1").fetchone()
+        if r and "profile" not in json.loads(r["data"]):
+            self.save_settings({"profile": "equilibre", **profile_values("equilibre")})
 
     # ---- réglages
     def settings(self) -> dict:

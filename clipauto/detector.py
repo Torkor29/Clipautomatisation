@@ -160,9 +160,12 @@ class Detector:
                 z = max(z, min(2.0 + v, 10.0))
             self.hist[k].append(v)
             zs[k] = round(float(z), 2)
-            score += w * max(z, 0.0)
-            wsum += w
-        score = score / wsum if wsum else 0.0
+        # Score = moyenne pondérée des 3 signaux qui montent le PLUS (et non de tous les signaux :
+        # un live GTA sans rires ni mots-clés ne doit pas « diluer » un chat qui explose).
+        top = sorted(((self.weights[k] * max(z, 0.0), self.weights[k]) for k, z in zs.items() if self.weights.get(k, 0) > 0),
+                     reverse=True)[:3]
+        wsum = sum(w for _, w in top)
+        score = sum(c for c, _ in top) / wsum if wsum else 0.0
         self.timeline.append((now, round(score, 2), zs))
         rising = sum(z > 1.5 for z in zs.values())
         if (now - self.t_start >= self.warmup and score >= self.threshold and rising >= self.min_signals
