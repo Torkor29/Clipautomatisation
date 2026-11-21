@@ -1485,6 +1485,8 @@ async function viewEditor(v, id) {
       ${!d.viral ? `<p style="color:var(--mute)">Clip créé avant l'ajout de l'analyse : relance la détection sur de nouveaux clips pour voir le détail.</p>` : ""}
       <h3>Ce qui a déclenché le clip</h3><div id="wsig"></div>
       <div id="wcurve"></div>
+      ${d.story ? `<h3>Comment le clip a été découpé</h3><ul class="reasons">${d.story.reasons.map((r) => `<li>${ic("scissors")} ${esc(r)}</li>`).join("")}</ul>` : ""}
+      ${d.facecam?.none ? `<p style="color:var(--mute);font-size:13px">Pas de webcam détectée dans ce passage : format « fond flou » utilisé à la place du cadre caméra.</p>` : ""}
       <h3>Ce qui est dit</h3><ul class="reasons" id="wreas"></ul>
       ${d.llm ? `<h3>Avis de l'IA</h3><p>${esc(d.llm.reason)}</p>` : ""}
       <h3>Le chat à ce moment ${d.chat ? `(${d.chat.length} messages)` : ""}</h3><div id="wchat"></div>

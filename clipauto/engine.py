@@ -74,7 +74,8 @@ class Session:
         self.started = time.time()
         self.clip_times: list[float] = []
         self.chat_msgs = 0
-        self.chat_log: deque = deque(maxlen=5000)  # (t, user, texte) pour expliquer les clips
+        self.chat_log: deque = deque(maxlen=5000)
+        self.pending: dict | None = None  # clip en préparation (on y ajoute les pics qui suivent de près)  # (t, user, texte) pour expliquer les clips
 
     def cfg(self) -> dict:
         return effective_settings(self.eng.db.settings(), self.row.get("overrides") or {})
@@ -127,17 +128,34 @@ class Session:
             trig = self.det.step(time.time() - 15, float(cfg["detect"]["chat_delay_seconds"]))
             if not trig:
                 continue
+            pd = self.pending
+            if pd and not pd["started"] and trig.t - pd["peaks"][-1] < 60:
+                # un autre pic juste après : même histoire → même clip
+                pd["peaks"].append(trig.t)
+                if trig.score > pd["trig"].score:
+                    pd["trig"] = trig
+                log.info("🔥 %s pic supplémentaire regroupé (%d pics)", self.streamer.key, len(pd["peaks"]))
+                continue
             self.clip_times = [t for t in self.clip_times if t > time.time() - 3600]
             if len(self.clip_times) >= cfg["detect"]["max_clips_per_hour"]:
                 continue
             self.clip_times.append(time.time())
             log.info("🔥 %s score=%s %s", self.streamer.key, trig.score, trig.detail["z"])
-            asyncio.create_task(self._clip(trig, cfg))
+            self.pending = {"peaks": [trig.t], "trig": trig, "started": False}
+            asyncio.create_task(self._clip(self.pending, cfg))
 
-    async def _clip(self, trig, cfg: dict) -> None:
+    async def _clip(self, pd: dict, cfg: dict) -> None:
         c = cfg["clip"]
-        pre, post = max(c["pre_roll"], c["max_seconds"]), c["post_roll"] + 5
-        await asyncio.sleep(max(trig.t + post + self.rec.seg_s + 5 - time.time(), 0))
+        ctx_before, ctx_after = 60.0, 40.0  # contexte analysé autour des pics (pour trouver début / fin)
+        while True:  # on attend la fin de la réaction au DERNIER pic (d'autres pics peuvent s'ajouter)
+            due = pd["peaks"][-1] + ctx_after + self.rec.seg_s + 5
+            if time.time() >= due:
+                break
+            await asyncio.sleep(min(due - time.time(), 5))
+        pd["started"] = True
+        if self.pending is pd:
+            self.pending = None
+        trig = pd["trig"]
         react = trig.detail.get("reaction", 0)
         lo, hi = trig.t - 20, trig.t + react + 15
         msgs = [(t, u, m) for t, u, m in self.chat_log if lo <= t <= hi]
@@ -155,11 +173,14 @@ class Session:
         trig.detail["stream"] = {"title": self.info.get("title"), "game": self.info.get("game")}
         name = f"{self.streamer.channel}_{int(trig.t)}"
         src = self.eng.data / "clips" / name / "source.mp4"
+        t_src = pd["peaks"][0] - ctx_before
+        curve = [(round(t - react - t_src, 1), sc) for t, sc, _ in self.det.timeline
+                 if t_src - 5 <= t - react <= pd["peaks"][-1] + ctx_after + 5]
         try:
-            await clipper.extract_source(self.rec.segments(), trig.t - pre, trig.t + post, src)
-            await self.eng.new_clip(src, peak=pre, streamer=self.streamer.channel,
+            await clipper.extract_source(self.rec.segments(), t_src, pd["peaks"][-1] + ctx_after, src)
+            await self.eng.new_clip(src, peak=trig.t - t_src, streamer=self.streamer.channel,
                                     platform=self.streamer.platform, score=trig.score, detail=trig.detail,
-                                    cfg=cfg, origin="live")
+                                    cfg=cfg, origin="live", peaks=[p - t_src for p in pd["peaks"]], curve=curve)
         except Exception:
             log.exception("échec du clip")
 
@@ -186,6 +207,7 @@ class Engine:
         self.review = make_review(self.on_decision)
         self.cpu = asyncio.Semaphore(1)  # transcriptions/rendus un par un (VPS sans GPU)
         self.monitor: LiveMonitor | None = None
+        self._last_curve: list | None = None
 
     # ---------- streamers
     def _streamers(self) -> list[Streamer]:
@@ -214,7 +236,8 @@ class Engine:
 
     # ---------- clips
     async def new_clip(self, src: Path, peak: float, streamer: str, platform: str, score: float,
-                       detail: dict, cfg: dict, origin: str, progress=None) -> int:
+                       detail: dict, cfg: dict, origin: str, progress=None, peaks: list | None = None,
+                       curve: list | None = None) -> int:
         c = cfg["clip"]
         say = progress or (lambda m: None)
         say("transcription de la voix (l'étape la plus longue)…")
@@ -222,8 +245,15 @@ class Engine:
             words = await asyncio.to_thread(clipper.transcribe, src, c["whisper_model"], c["language"],
                                             c.get("streamer_only", True))
         total = await clipper.probe_duration(src)
-        t0, t1 = clipper.smart_trim(words, peak, total, c["min_seconds"], c["max_seconds"],
-                                    c["pre_roll"], c["post_roll"], c["snap_to_sentences"])
+        story = None
+        if curve is not None:
+            from .story import story_window
+            story = story_window(words, peaks or [peak], curve, total, c["min_seconds"], c["max_seconds"],
+                                 cfg["detect"]["threshold"], c.get("remove_silences", True))
+            t0, t1 = story["segments"][0][0], story["segments"][-1][1]
+        else:
+            t0, t1 = clipper.smart_trim(words, peak, total, c["min_seconds"], c["max_seconds"],
+                                        c["pre_roll"], c["post_roll"], c["snap_to_sentences"])
         kept = [w for w in words if t0 <= w["s"] < t1 and not w.get("skip")]
         from .titles import suggest
         title_opts = suggest(kept, streamer, detail, (detail.get("stream") or {}).get("game"))
@@ -242,6 +272,8 @@ class Engine:
         viral = virality.combine(sig, analysis["score"], llm["score"] if llm else None)
         if llm and llm.get("title"):
             title_opts = [llm["title"]] + [t for t in title_opts if t != llm["title"]]
+        if story:
+            detail["story"] = story
         detail = {**detail, "title_options": title_opts, "analysis": analysis, "signals": virality.explain_signals(detail),
                   "signal_score": sig, "llm": llm, "viral": viral, "peak_src": round(peak, 2)}
         layout = dict(cfg["layout"])
@@ -256,6 +288,9 @@ class Engine:
             if fc:
                 layout["facecam"] = fc["facecam"]
                 detail["facecam"] = fc
+            else:  # pas de cam visible (jeu plein écran) : pas de cadre vide ou mal placé
+                layout["mode"] = "blur"
+                detail["facecam"] = {"none": True}
         min_v = int(c.get("min_viral", 0) or 0)
         # un import est une demande explicite : on garde tout (le score reste visible) ; seuls les clips live sont filtrés
         rejected = viral < min_v and origin == "live"
@@ -263,9 +298,13 @@ class Engine:
         cid = self.db.add_clip(streamer=streamer, platform=platform, source=str(src), thumb=str(thumb),
                                score=score, detail=detail, transcript=" ".join(w["w"] for w in kept),
                                words=words, edit={**default_edit(cfg, (t0, t1), title), "layout": layout,
+                                                  **({"segments": [{"s": a, "e": b, "effect": "none",
+                                                                    "transition": {"type": "cut", "duration": 0.4}}
+                                                                   for a, b in story["segments"]]} if story else {}),
                                                   # une vidéo verticale a souvent déjà ses sous-titres incrustés
                                                   **({"captions": False} if vertical else {})},
-                               title=title, duration=t1 - t0, origin=origin,
+                               title=title, duration=(sum(b - a for a, b in story["segments"]) if story else t1 - t0),
+                               origin=origin,
                                status="rejected" if rejected else "pending",
                                error=f"Écarté automatiquement : score viral {viral} < minimum {min_v}" if rejected else None)
         if rejected:
@@ -386,9 +425,11 @@ class Engine:
                 c = cfg["clip"]
                 pre = max(c["pre_roll"], c["max_seconds"])
                 dst = self.data / "clips" / f"import{jid}_{int(t)}" / "source.mp4"
-                await clipper.cut_file(path, t - pre, t + c["post_roll"] + 5, dst)
+                await clipper.cut_file(path, t - pre, t + 40, dst)
                 lbl = f"clip {i + 1}/{len(peaks)}"
-                await self.new_clip(dst, peak=min(pre, t), streamer=opts.get("streamer", ""),
+                t_src = max(t - pre, 0)
+                curve = [(round(ct - t_src, 1), cv) for ct, cv in (self._last_curve or []) if t_src - 5 <= ct <= t + 45]
+                await self.new_clip(dst, peak=min(pre, t), streamer=opts.get("streamer", ""), curve=curve,
                                     platform="import", score=score, detail={"z": z}, cfg=cfg, origin="import",
                                     progress=lambda m, lbl=lbl: self.db.update_job(jid, message=f"{lbl} : {m}"))
             self.db.update_job(jid, status="done", progress=1, message=f"{len(peaks)} clips créés")
@@ -419,6 +460,7 @@ class Engine:
                     i = int(w["s"] / 2)
                     if 0 <= i < len(score):
                         score[max(i - 2, 0):i + 2] += 3
+        self._last_curve = [(float(i * 2 + 5), round(float(v) / 2, 2)) for i, v in enumerate(score)]
         gap = int(cfg["clip"]["max_seconds"] / 2) + 5
         picks: list[tuple[float, float, dict]] = []
         for i in np.argsort(-score):

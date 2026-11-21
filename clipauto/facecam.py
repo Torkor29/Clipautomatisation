@@ -42,12 +42,17 @@ def detect(path: Path) -> dict | None:
 
 def _detect(path: Path) -> dict | None:
     casc = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    alt = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_alt2.xml")
     boxes = []
     for f in _frames(path):
         h, w = f.shape
-        faces = casc.detectMultiScale(f, scaleFactor=1.1, minNeighbors=6, minSize=(w // 40, w // 40))
+        faces = casc.detectMultiScale(f, scaleFactor=1.1, minNeighbors=7, minSize=(w // 40, w // 40))
         for (x, y, fw, fh) in faces:
-            boxes.append((x / w, y / h, fw / w, fh / h))
+            # confirmation par un 2e détecteur sur la zone (évite les « visages » dans les immeubles / le décor)
+            pad = int(fw * 0.25)
+            roi = f[max(y - pad, 0):y + fh + pad, max(x - pad, 0):x + fw + pad]
+            if roi.size and len(alt.detectMultiScale(roi, scaleFactor=1.1, minNeighbors=4, minSize=(fw // 2, fw // 2))):
+                boxes.append((x / w, y / h, fw / w, fh / h))
     if not boxes:
         return None
     # visage le plus souvent présent au même endroit (une facecam ne bouge pas)
@@ -58,6 +63,8 @@ def _detect(path: Path) -> dict | None:
         k = int(np.sum(np.linalg.norm(centers - c, axis=1) < 0.06))
         if k > cnt:
             best, cnt = i, k
+    if cnt < 3:  # un vrai visage de webcam est là sur la plupart des images
+        return None
     near = arr[np.linalg.norm(centers - centers[best], axis=1) < 0.06]
     x, y, fw, fh = np.median(near, axis=0)
     full_cam = fw > 0.12  # gros visage = stream « IRL / juste chatting », pas une petite cam

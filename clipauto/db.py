@@ -24,7 +24,7 @@ DEFAULT_SETTINGS = {
     },
     "clip": {"min_seconds": 30, "max_seconds": 60, "pre_roll": 40, "post_roll": 20,
              "snap_to_sentences": True, "language": "fr", "whisper_model": "small", "auto_render": True,
-             "min_viral": 35, "streamer_only": True},
+             "min_viral": 35, "streamer_only": True, "remove_silences": True},
     "style": {
         "preset": "karaoke", "font": "Montserrat Black", "size": 100, "uppercase": True,
         "color": "#FFFFFF", "highlight": "#FFE500", "emphasis_color": "#FF4D4D", "emphasis": True,
