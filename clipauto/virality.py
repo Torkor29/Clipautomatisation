@@ -169,38 +169,15 @@ Transcription : \"\"\"{text}\"\"\""""
 
 
 def llm_judge(text: str, streamer: str, platform: str, cfg: dict, usage: dict) -> dict | None:
-    """Renvoie None si désactivé, budget atteint ou erreur. `usage` est mis à jour (appels du jour)."""
-    if not cfg.get("enabled") or not text.strip():
+    """Avis IA simple (score + titre) quand le « monteur IA » n'est pas utilisé."""
+    from .llm import call_json
+    if not text.strip():
         return None
-    day = time.strftime("%Y-%m-%d")
-    if usage.get("day") != day:
-        usage.clear()
-        usage.update(day=day, calls=0)
-    if usage["calls"] >= int(cfg.get("max_calls_per_day", 50)):
-        log.info("juge IA : plafond quotidien atteint")
+    d = call_json(PROMPT.format(platform=platform, streamer=streamer, text=text[:4000]), cfg, usage, 250)
+    if not d:
         return None
-    prompt = PROMPT.format(platform=platform, streamer=streamer, text=text[:4000])
     try:
-        if cfg.get("provider") == "ollama":
-            body = {"model": cfg.get("model") or "qwen2.5:7b", "prompt": prompt, "stream": False, "format": "json"}
-            req = urllib.request.Request(cfg.get("ollama_url", "http://localhost:11434") + "/api/generate",
-                                         data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
-            out = json.loads(urllib.request.urlopen(req, timeout=120).read())["response"]
-        else:
-            key = os.environ.get("GEMINI_API_KEY")
-            if not key:
-                return None
-            model = cfg.get("model") or "gemini-2.5-flash-lite"
-            body = {"contents": [{"parts": [{"text": prompt}]}],
-                    "generationConfig": {"responseMimeType": "application/json", "maxOutputTokens": 200}}
-            req = urllib.request.Request(
-                f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-                data=json.dumps(body).encode(), headers={"Content-Type": "application/json", "x-goog-api-key": key})
-            out = json.loads(urllib.request.urlopen(req, timeout=60).read())["candidates"][0]["content"]["parts"][0]["text"]
-        usage["calls"] += 1
-        d = json.loads(out)
         return {"score": int(d.get("score", 0)), "title": str(d.get("title", ""))[:80],
                 "reason": str(d.get("reason", ""))[:300], "keep": bool(d.get("keep", True))}
-    except Exception as e:  # jamais bloquant
-        log.warning("juge IA indisponible : %s", e)
+    except (TypeError, ValueError):
         return None

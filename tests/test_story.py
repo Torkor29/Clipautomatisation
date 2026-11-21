@@ -27,3 +27,14 @@ def test_two_peaks_merge_and_cut_the_gap():
     r = story_window(words, [20, 72], curve, 100, 20, 45)
     total = sum(b - a for a, b in r["segments"])
     assert len(r["segments"]) >= 2 and total <= 46
+
+
+def test_llm_monteur_guardrails(monkeypatch):
+    from clipauto import llm
+    words = _w("Attends regarde la police arrive !", 30) + _w("non non il m'a eu frère c'est mort.", 52) + _w("bref on repart.", 75)
+    monkeypatch.setattr(llm, "call_json", lambda *a, **k: {"start": 29.7, "end": 55.4, "remove": [[40, 50]],
+                                                          "title": "Michou vs la police", "score": 80, "reason": "ok", "keep": True})
+    r = llm.monteur(words, [55], [(t, 1.0) for t in range(100)], [], 100, 20, 45, "michou", "twitch", None, {}, {})
+    assert r["segments"][0][0] < 30.1 and r["segments"][-1][1] > 55
+    monkeypatch.setattr(llm, "call_json", lambda *a, **k: {"start": 60, "end": 90, "title": "x", "score": 10})
+    assert llm.monteur(words, [55], [], [], 100, 20, 45, "", "", None, {}, {})["segments"] is None  # pic exclu → refusé

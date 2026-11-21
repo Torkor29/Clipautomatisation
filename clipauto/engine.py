@@ -263,8 +263,22 @@ class Engine:
         analysis = virality.analyze_text(words, t0, t1, cfg["detect"]["keywords"])
         sig = virality.signal_score(score) if detail.get("z") else None
         usage = dict(settings.get("ai_usage") or {})
-        llm = await asyncio.to_thread(virality.llm_judge, " ".join(w["w"] for w in kept), streamer, platform,
-                                      settings["ai"], usage)
+        llm = None
+        if story and settings["ai"].get("use_for_cut", True):
+            from . import llm as llm_mod
+            llm = await asyncio.to_thread(llm_mod.monteur, words, story["peaks"], curve or [], detail.get("chat"),
+                                          total, c["min_seconds"], c["max_seconds"], streamer, platform,
+                                          (detail.get("stream") or {}).get("game"), settings["ai"], usage)
+            if llm and llm.get("segments"):
+                story = {**story, "segments": llm["segments"],
+                         "reasons": [f"Découpé par l'IA ({settings['ai'].get('provider')}) : {llm['reason']}"] + story["reasons"][-1:],
+                         "local_segments": story["segments"]}
+                t0, t1 = story["segments"][0][0], story["segments"][-1][1]
+                kept = [w for w in words if t0 <= w["s"] < t1 and not w.get("skip")]
+                analysis = virality.analyze_text(words, t0, t1, cfg["detect"]["keywords"])
+        if llm is None:
+            llm = await asyncio.to_thread(virality.llm_judge, " ".join(w["w"] for w in kept), streamer, platform,
+                                          settings["ai"], usage)
         if usage != settings.get("ai_usage"):
             self.db.save_settings({"ai_usage": usage})
         if llm and settings["ai"].get("use_title") and llm.get("title"):

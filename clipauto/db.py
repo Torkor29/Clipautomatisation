@@ -39,7 +39,7 @@ DEFAULT_SETTINGS = {
     "hook": {"enabled": True, "seconds": 3.5, "size": 84, "color": "#FFFFFF", "bg": "#000000"},
     "compilation": {"transition": "fade", "transition_duration": 0.4, "max_each": 20, "clips": 6,
                     "hours": 12},
-    "ai": {"enabled": False, "provider": "gemini", "model": "gemini-2.5-flash-lite", "max_calls_per_day": 30,
+    "ai": {"enabled": False, "provider": "deepseek", "model": "", "max_calls_per_day": 40, "use_for_cut": True,
            "use_title": True, "ollama_url": "http://localhost:11434"},
     "ai_usage": {},
     "publish": {"auto_publish": False, "social_accounts": [],

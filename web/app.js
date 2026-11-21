@@ -456,17 +456,18 @@ async function viewSettings(v) {
      </div>
    </div>
    <div class="card"><h2>${ic("palette")} Style par défaut des nouveaux clips</h2><div id="stylebox"></div></div>
-   <div class="card"><h2>${ic("bot")} Juge IA (optionnel, payant)</h2>
-     <p style="color:var(--mute);margin-top:0">Sans IA, l'outil analyse déjà gratuitement le chat, le son et ce qui est dit. L'IA ajoute un avis + un titre accrocheur. <b>Désactivée par défaut.</b></p>
-     <label class="inline f"><input type="checkbox" data-p="ai.enabled" ${S.ai.enabled ? "checked" : ""}><b>Activer le juge IA</b></label>
+   <div class="card"><h2>${ic("bot")} Monteur IA (optionnel)</h2>
+     <p style="color:var(--mute);margin-top:0">Une IA texte lit la transcription horodatée, l'intensité du live et le chat, puis choisit le début, la fin, les passages à couper, le titre et le score — comme OpusClip. Sans IA, l'outil fait déjà tout ça avec ses propres règles (gratuit).</p>
+     <label class="inline f"><input type="checkbox" data-p="ai.enabled" ${S.ai.enabled ? "checked" : ""}><b>Activer l'IA</b></label>
      <div class="grid2" style="gap:10px">
-      <label class="f"><b>Fournisseur</b><select data-p="ai.provider"><option value="gemini" ${S.ai.provider === "gemini" ? "selected" : ""}>Gemini (clé GEMINI_API_KEY)</option><option value="ollama" ${S.ai.provider === "ollama" ? "selected" : ""}>Ollama (gratuit, sur ton serveur)</option></select></label>
-      <label class="f"><b>Modèle</b><input type="text" data-p="ai.model" value="${esc(S.ai.model)}"></label>
+      <label class="f"><b>Fournisseur</b><select data-p="ai.provider">${Object.entries(META.llm).map(([k, v]) => `<option value="${k}" ${S.ai.provider === k ? "selected" : ""}>${v.label}${v.has_key ? "" : " — clé manquante"}</option>`).join("")}</select>
+        <small>${(() => { const v = META.llm[S.ai.provider]; return v && !v.has_key ? `Ajoute <code>${v.key}=…</code> dans le fichier .env du serveur puis redémarre.` : "Clé trouvée sur le serveur."; })()}</small></label>
+      <label class="f"><b>Modèle</b><input type="text" data-p="ai.model" value="${esc(S.ai.model || "")}" placeholder="${esc(META.llm[S.ai.provider]?.model || "")}"><small>Vide = modèle par défaut du fournisseur</small></label>
       <label class="f"><b>Plafond d'appels / jour</b><input type="number" data-p="ai.max_calls_per_day" data-n value="${S.ai.max_calls_per_day}"><small>1 appel par clip</small></label>
       <label class="f"><b>Utilisé aujourd'hui</b><input type="text" disabled value="${(S.ai_usage?.day === new Date().toISOString().slice(0, 10) ? S.ai_usage.calls : 0)} appel(s)"></label>
      </div>
+     <label class="inline f"><input type="checkbox" data-p="ai.use_for_cut" ${S.ai.use_for_cut !== false ? "checked" : ""}><b>Laisser l'IA choisir le découpage</b></label>
      <label class="inline f"><input type="checkbox" data-p="ai.use_title" ${S.ai.use_title ? "checked" : ""}><b>Utiliser le titre proposé par l'IA</b></label>
-     <small style="color:var(--mute)">Coût estimé avec gemini-2.5-flash-lite : ~0,0002 $ par clip (≈ 1 000 tokens) → 30 clips/jour ≈ 0,20 $/mois. Le plafond bloque tout dépassement.</small>
    </div>
    <div class="card"><h2>${ic("clapperboard")} Résumés de live</h2>
      <div class="grid2" style="gap:10px">

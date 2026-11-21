@@ -114,7 +114,10 @@ def create_app(data_dir: Path | None = None, start_engine: bool = True) -> FastA
 
     @app.get("/api/meta")
     def meta():
-        return {"profiles": PROFILES, "fonts": list(FONTS), "presets": PRESETS, "defaults": DEFAULT_SETTINGS, "platforms": PLATFORMS,
+        from .llm import PROVIDERS
+        llm_info = {k: {"label": v["label"], "model": v["model"], "key": v["key"],
+                        "has_key": v["key"] is None or bool(os.environ.get(v["key"]))} for k, v in PROVIDERS.items()}
+        return {"llm": llm_info, "profiles": PROFILES, "fonts": list(FONTS), "presets": PRESETS, "defaults": DEFAULT_SETTINGS, "platforms": PLATFORMS,
                 "transitions": TRANSITIONS, "effects": EFFECTS, "caption_base": BASE,
                 "font_ratio": {f: em_ratio(f) for f in FONTS}, "word_anims": WORD_ANIMS,
                 "line_anims": LINE_ANIMS, "sfx": SFX, "ovl_anims": ovl.ANIM_IN}
