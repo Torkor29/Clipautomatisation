@@ -36,5 +36,5 @@ def test_llm_monteur_guardrails(monkeypatch):
                                                           "title": "Michou vs la police", "score": 80, "reason": "ok", "keep": True})
     r = llm.monteur(words, [55], [(t, 1.0) for t in range(100)], [], 100, 20, 45, "michou", "twitch", None, {}, {})
     assert r["segments"][0][0] < 30.1 and r["segments"][-1][1] > 55
-    monkeypatch.setattr(llm, "call_json", lambda *a, **k: {"start": 60, "end": 90, "title": "x", "score": 10})
+    monkeypatch.setattr(llm, "call_json", lambda *a, **k: {"start": 76, "end": 90, "title": "x", "score": 10})
     assert llm.monteur(words, [55], [], [], 100, 20, 45, "", "", None, {}, {})["segments"] is None  # pic exclu → refusé
