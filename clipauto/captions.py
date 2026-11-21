@@ -168,7 +168,8 @@ def group_words(words: list[dict], per_line: int, max_chars: int) -> list[list[d
 
 def caption_y(style: dict, layout: dict | None) -> float:
     if style.get("auto_position", True) and layout and layout.get("mode") == "split":
-        return float(layout.get("split_ratio", 0.5)) * 100
+        r = float(layout.get("split_ratio", 0.5))
+        return (1 - r if layout.get("cam_position") == "bottom" else r) * 100  # sur la jonction cam / jeu
     return float(style.get("position", 72))
 
 

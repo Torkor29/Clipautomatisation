@@ -426,3 +426,18 @@ body.is-login>*:not(#login):not(script){display:none!important}
 .popt small{color:var(--mute);font-size:12.5px;line-height:1.4}
 .popt .pvals{color:var(--faint);font:11px "Geist Mono",monospace}
 @media (max-width:900px){.popts.row3{grid-template-columns:1fr}}
+
+.wsep{width:100%;font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:.06em;margin:8px 0 2px;font-weight:600}
+.wsep:first-child{margin-top:0}
+@media (max-width:900px){
+  /* éditeur : l'aperçu vidéo reste collé en haut pendant qu'on fait défiler les réglages (comme CapCut) */
+  .ed .stage{display:contents}
+  .ed{--pw:min(34vw,170px);--ptop:calc(58px + var(--safe-t))}
+  .ed .phone{position:sticky;top:var(--ptop);z-index:12;width:var(--pw);justify-self:center;
+    box-shadow:0 0 0 100vmax var(--bg);clip-path:inset(-10px -100vmax)}
+  /* onglets de l'éditeur collés juste sous l'aperçu */
+  .ed .panel{overflow:visible}
+  .ed .ptabs{position:sticky;top:calc(var(--ptop) + var(--pw) * 1.7778 + 10px);z-index:11;background:var(--panel);border-radius:var(--r) var(--r) 0 0}
+  .ed .panel,.ed .ptabs,.ed .pbody>*{scroll-margin-top:calc(var(--ptop) + var(--pw) * 1.7778 + 60px)}
+  .ed .controls{justify-self:stretch}
+}

@@ -609,7 +609,7 @@ function prepareWords(words, st, keywords) { // identique à captions.prepare_wo
   }
   return out;
 }
-const captionY = (st, L) => (st.auto_position !== false && L && L.mode === "split") ? L.split_ratio * 100 : st.position;
+const captionY = (st, L) => (st.auto_position !== false && L && L.mode === "split") ? (L.cam_position === "bottom" ? 1 - L.split_ratio : L.split_ratio) * 100 : st.position;
 function groupWords(words, perLine, maxChars) { // identique à captions.group_words (Python)
   const lines = []; let cur = [];
   for (const w of words) {
@@ -657,10 +657,19 @@ async function viewEditor(v, id) {
   const syncTrim = () => { if (!reordered) E.segments.sort((a, b) => a.s - b.s); E.trim = [Math.min(...E.segments.map((g) => g.s)), Math.max(...E.segments.map((g) => g.e))]; };
   let dirty = false, shift = 0;
   let tlTimer = null, tlBusy = false;
+  let txTimer = null;
+  const editingText = () => { const a = document.activeElement; return a && (a.isContentEditable || a.tagName === "TEXTAREA" || (a.tagName === "INPUT" && a.type === "text")); };
   const mark = () => {
     dirty = true; $("#dirty").hidden = false; draw();
     if (!tlBusy && typeof renderTL === "function") { clearTimeout(tlTimer); tlTimer = setTimeout(() => { if (!tlBusy) renderTL(); }, 250); }
+    clearTimeout(txTimer);
+    txTimer = setTimeout(() => {
+      if (tlBusy || editingText()) return;
+      if (typeof curTab !== "undefined" && curTab === 1) showTab(1);
+      const tp = $("#trp"); if (tp && !tp.hidden) renderTranscript();
+    }, 400);
   };
+  let onlyClip = true; // transcription : seulement ce qui est dans le clip
 
   v.append(h(`<div class="row" style="margin-bottom:16px">
     <a class="btn sm" href="#/clips">${ic("chevron-left")} Clips</a>
@@ -719,9 +728,9 @@ async function viewEditor(v, id) {
     const box = (top, hh) => { const b = h(`<div class="box"></div>`); Object.assign(b.style, { top: `${top}px`, height: `${hh}px` }); ph.append(b); return b; };
     if (L.mode === "split") {
       const th = Math.round(H * L.split_ratio), bh = H - th;
-      if (L.cam_position === "bottom") {
-        place(mk(), box(0, th), W, th, cropRect(L.gameplay, iw, ih, W / th));
-        place(mk(), box(th, bh), W, bh, cropRect(L.facecam, iw, ih, W / bh));
+      if (L.cam_position === "bottom") { // jeu en haut (bh), cam en bas (th = part de la cam)
+        place(mk(), box(0, bh), W, bh, cropRect(L.gameplay, iw, ih, W / bh));
+        place(mk(), box(bh, th), W, th, cropRect(L.facecam, iw, ih, W / th));
       } else {
         place(mk(), box(0, th), W, th, cropRect(L.facecam, iw, ih, W / th));
         place(mk(), box(th, bh), W, bh, cropRect(L.gameplay, iw, ih, W / bh));
@@ -1374,26 +1383,48 @@ async function viewEditor(v, id) {
         <button class="btn sm" id="retr">${ic("refresh-cw")} Re-transcrire</button></div>
       <label class="f" style="margin-top:14px"><b>Synchro : décaler tous les sous-titres <span id="shv">${shift.toFixed(2)} s</span></b>
         <input type="range" min="-1" max="1" step="0.05" id="sh" value="${shift}"><small>Si le texte arrive trop tôt → vers la droite. Appliqué à l'enregistrement.</small></label>
-      <h3>Texte (clique un mot pour le corriger · Suppr pour l'effacer · double-clic pour s'y rendre)</h3>
+      <div class="row" style="margin:18px 0 8px"><h3 style="margin:0">Texte du clip</h3><div class="spacer"></div>
+        <label class="inline" style="font-size:13px;color:var(--mute)"><input type="checkbox" id="oc" ${onlyClip ? "checked" : ""}> Seulement le clip</label></div>
+      <small style="color:var(--mute);display:block;margin-bottom:8px">Touche un mot pour aller à ce moment et le corriger. Se met à jour quand tu changes le montage.</small>
       <div class="words" id="wl"></div></div>`));
     $("#cOn").onchange = (e) => { E.captions = e.target.checked; mark(); };
     $("#sh").oninput = (e) => { shift = Number(e.target.value); $("#shv").textContent = `${shift.toFixed(2)} s`; mark(); };
     $("#retr").onclick = async (e) => {
-      e.target.disabled = true; e.target.textContent = "transcription…";
-      try { words = (await api(`/api/clips/${clip.id}/retranscribe`, { method: "POST", json: { language: $("#lang").value } })).words; toast("Transcription mise à jour"); mark(); showTab(1); } catch (er) { toast(er.message); e.target.disabled = false; }
+      const btn = e.currentTarget; btn.disabled = true; btn.innerHTML = `${ic("loader", "spin")} transcription… (1-3 min)`;
+      try {
+        const { job } = await api(`/api/clips/${clip.id}/retranscribe`, { method: "POST", json: { language: $("#lang").value } });
+        for (let n = 0; n < 240; n++) {
+          await new Promise((r) => setTimeout(r, 2500));
+          const j = (await api("/api/jobs")).find((x) => x.id === job);
+          if (!j || j.status === "running") continue;
+          if (j.status === "error") throw new Error(j.message);
+          words = (await api(`/api/clips/${clip.id}`)).words; capKey = ""; toast("Transcription mise à jour"); mark(); showTab(1); return;
+        }
+        throw new Error("toujours en cours, reviens dans quelques minutes");
+      } catch (er) { toast(`Échec : ${er.message}`, 6000); btn.disabled = false; btn.innerHTML = `${ic("refresh-cw")} Re-transcrire`; }
     };
     const wl = $("#wl");
+    $("#oc").onchange = (e) => { onlyClip = e.target.checked; showTab(1); };
+    const inSeg = (w) => E.segments.findIndex((g) => w.s >= g.s - 0.01 && w.s < g.e);
+    let lastSeg = -2;
     words.forEach((w, i) => {
-      const out = w.e <= E.trim[0] || w.s >= E.trim[1];
-      const el = h(`<span class="w ${out || w.skip ? "out" : ""}" ${w.skip ? 'title="voix du jeu : masquée" style="text-decoration:line-through"' : ""} contenteditable="true" spellcheck="false" data-i="${i}">${esc(w.w)}</span>`);
-      el.oninput = () => { w.w = el.textContent; mark(); };
-      el.ondblclick = () => seek(w.s - 0.05);
+      const k = inSeg(w);
+      if (onlyClip && k < 0) return;
+      if (k !== lastSeg) {
+        lastSeg = k;
+        wl.append(h(`<div class="wsep">${k >= 0 ? `Passage ${k + 1} · ${fmt(outTime(w.s))} dans le clip` : `Hors du clip · ${fmt(w.s)} de la source`}</div>`));
+      }
+      const el = h(`<span class="w ${k < 0 || w.skip ? "out" : ""}" ${w.skip ? 'title="voix du jeu : masquée" style="text-decoration:line-through"' : ""} contenteditable="true" spellcheck="false" data-i="${i}">${esc(w.w)}</span>`);
+      el.oninput = () => { w.w = el.textContent; capKey = ""; dirty = true; $("#dirty").hidden = false; };
+      el.onblur = () => mark();
+      el.onclick = () => { curSeg = Math.max(k, 0); seek(w.s - 0.05); };
       el.onkeydown = (e) => {
         if (e.key === "Enter") { e.preventDefault(); el.blur(); }
         if ((e.key === "Delete" || e.key === "Backspace") && !el.textContent.trim()) { e.preventDefault(); words.splice(i, 1); mark(); showTab(1); }
       };
       wl.append(el);
     });
+    if (!wl.children.length) wl.append(h(`<div class="wsep">Personne ne parle dans les passages du clip.</div>`));
   }
 
   function tabStyle() {
@@ -1431,7 +1462,7 @@ async function viewEditor(v, id) {
       };
     }
     if (L.mode === "split") {
-      opts.append(h(`<div><label class="f"><b>Répartition cam / jeu</b></label><div class="row" style="margin-bottom:10px">${[[0.5, "50 / 50"], [0.4, "40 / 60"], [0.33, "33 / 67"], [0.25, "25 / 75"]].map(([r, l]) => `<button class="btn sm ${Math.abs(L.split_ratio - r) < .01 ? "pri" : ""}" data-ratio="${r}">${l}</button>`).join("")}
+      opts.append(h(`<div><label class="f"><b>Part de la cam / part du jeu</b></label><div class="row" style="margin-bottom:10px">${[[0.5, "50 / 50"], [0.4, "40 / 60"], [0.33, "33 / 67"], [0.25, "25 / 75"]].map(([r, l]) => `<button class="btn sm ${Math.abs(L.split_ratio - r) < .01 ? "pri" : ""}" data-ratio="${r}">${l}</button>`).join("")}
         <button class="btn sm" id="swp">${ic("arrow-up-down")} Cam ${L.cam_position === "bottom" ? "en bas" : "en haut"}</button></div>
         <label class="f"><b>Réglage fin <span id="srv">${Math.round(L.split_ratio * 100)}%</span></b><input type="range" min="0.2" max="0.7" step="0.01" id="sr" value="${L.split_ratio}"></label></div>`));
       $$("[data-ratio]", opts).forEach((b) => b.onclick = () => { L.split_ratio = Number(b.dataset.ratio); buildStage(); mark(); showTab(3); });
@@ -1553,16 +1584,20 @@ async function viewEditor(v, id) {
   }
   function renderTranscript() {
     const box = $("#trp"); box.innerHTML = "";
-    box.append(h(`<small style="color:var(--mute)">Clique dans une phrase pour corriger. Les mots grisés sont hors du clip. Entrée = valider.</small>`));
+    const head = h(`<div class="row" style="margin-bottom:6px"><small style="color:var(--mute);flex:1">Touche une phrase pour la corriger (Entrée = valider).</small>
+      <label class="inline" style="font-size:12px;color:var(--mute)"><input type="checkbox" ${onlyClip ? "checked" : ""}> Seulement le clip</label></div>`);
+    $("input", head).onchange = (e) => { onlyClip = e.target.checked; renderTranscript(); };
+    box.append(head);
     for (const idx of sentencesOf()) {
       const s0 = words[idx[0]], inClip = E.segments.some((g) => s0.s >= g.s - 0.01 && s0.s < g.e);
+      if (onlyClip && !inClip) continue;
       const game = !!s0.skip;
       if (game || idx.length) {
         const tg = h(`<button class="btn sm trg ${game ? "" : "on"}" title="${game ? "Voix du jeu / autre langue : masquée des sous-titres. Cliquer pour l'afficher" : "Cliquer pour masquer cette phrase des sous-titres"}">${game ? "masquée" : ""}</button>`);
         tg.onclick = () => { idx.forEach((i) => { if (game) delete words[i].skip; else words[i].skip = true; }); capKey = ""; mark(); renderTranscript(); };
         box.append(tg);
       }
-      const el = h(`<p class="trs ${inClip ? "" : "out"} ${game ? "game" : ""}" contenteditable="true" spellcheck="true"><span class="tt">${fmt(s0.s)}</span>${esc(idx.map((i) => words[i].w).join(" "))}</p>`);
+      const el = h(`<p class="trs ${inClip ? "" : "out"} ${game ? "game" : ""}" contenteditable="true" spellcheck="true"><span class="tt">${inClip ? fmt(outTime(s0.s)) : "hors clip"}</span>${esc(idx.map((i) => words[i].w).join(" "))}</p>`);
       el.dataset.first = idx[0]; el.dataset.n = idx.length;
       el.onfocus = () => { seek(s0.s - 0.05); };
       el.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); el.blur(); } };

@@ -199,12 +199,24 @@ def create_app(data_dir: Path | None = None, start_engine: bool = True) -> FastA
     async def retranscribe(cid: int, language: str | None = Body(None, embed=True)):
         c = clip_or_404(cid)
         cfg = eng.db.settings()["clip"]
-        from . import clipper
-        async with eng.cpu:
-            words = await asyncio.to_thread(clipper.transcribe, Path(c["source"]), cfg["whisper_model"],
-                                            language or cfg["language"], cfg.get("streamer_only", True))
-        eng.db.update_clip(cid, words=words)
-        return {"words": words}
+        jid = eng.db.add_job("transcribe", f"Re-transcription du clip #{cid}")
+
+        async def work():
+            from . import clipper
+            try:
+                eng.db.update_job(jid, message="en attente du processeur…", progress=0.1)
+                async with eng.cpu:
+                    eng.db.update_job(jid, message="transcription…", progress=0.3)
+                    words = await asyncio.to_thread(clipper.transcribe, Path(c["source"]), cfg["whisper_model"],
+                                                    language if language is not None else cfg["language"],
+                                                    cfg.get("streamer_only", True))
+                eng.db.update_clip(cid, words=words)
+                eng.db.update_job(jid, status="done", progress=1, message=f"{len(words)} mots")
+            except Exception as e:
+                log.exception("re-transcription")
+                eng.db.update_job(jid, status="error", message=str(e)[-300:])
+        bg(work())
+        return {"job": jid}
 
     @app.get("/api/clips/{cid}/titles")
     def clip_titles(cid: int):

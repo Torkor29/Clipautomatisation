@@ -71,7 +71,7 @@ async def thumbnail(src: Path, t: float, out: Path) -> Path:
 
 
 # ---------------------------------------------------------------- transcription
-@lru_cache(maxsize=2)
+@lru_cache(maxsize=1)  # un seul modèle en RAM (petits serveurs)
 def _model(size: str):
     from faster_whisper import WhisperModel
     return WhisperModel(size, compute_type="int8")
@@ -275,11 +275,11 @@ def layout_filter(layout: dict, iw: int, ih: int, inp: str = "0:v", outl: str = 
         bh = OUT_H - th
         top = _crop(layout.get("facecam", {}), iw, ih, OUT_W / th)
         bot = _crop(layout.get("gameplay", {}), iw, ih, OUT_W / bh)
-        if layout.get("cam_position", "top") == "bottom":  # jeu en haut, cam en bas
-            top = _crop(layout.get("facecam", {}), iw, ih, OUT_W / bh)
-            bot = _crop(layout.get("gameplay", {}), iw, ih, OUT_W / th)
-            return (f"[{inp}]split[{outl}a][{outl}b];[{outl}a]{top},scale={OUT_W}:{bh}[{outl}t];"
-                    f"[{outl}b]{bot},scale={OUT_W}:{th}[{outl}g];[{outl}g][{outl}t]vstack,setsar=1[{outl}]")
+        if layout.get("cam_position", "top") == "bottom":  # jeu en haut (bh), cam en bas (th = part de la cam)
+            cam = _crop(layout.get("facecam", {}), iw, ih, OUT_W / th)
+            game = _crop(layout.get("gameplay", {}), iw, ih, OUT_W / bh)
+            return (f"[{inp}]split[{outl}a][{outl}b];[{outl}a]{cam},scale={OUT_W}:{th}[{outl}t];"
+                    f"[{outl}b]{game},scale={OUT_W}:{bh}[{outl}g];[{outl}g][{outl}t]vstack,setsar=1[{outl}]")
         return (f"[{inp}]split[{outl}a][{outl}b];[{outl}a]{top},scale={OUT_W}:{th}[{outl}t];[{outl}b]{bot},scale={OUT_W}:{bh}[{outl}g];"
                 f"[{outl}t][{outl}g]vstack,setsar=1[{outl}]")
     if mode == "pip":  # jeu plein écran + cam incrustée dans un coin
