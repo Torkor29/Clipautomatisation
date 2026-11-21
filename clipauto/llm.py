@@ -28,6 +28,8 @@ PROVIDERS = {
                    "label": "OpenRouter (modèles gratuits)"},
     "openai": {"url": "https://api.openai.com/v1", "key": "OPENAI_API_KEY", "model": "gpt-4.1-mini",
                "label": "OpenAI (clé API, ≈ 0,001 $ / clip)"},
+    "nous": {"url": "https://inference-api.nousresearch.com/v1", "key": "NOUS_API_KEY", "model": "qwen/qwen4-max:free",
+             "label": "Nous Portal (modèles gratuits)"},
     "groq": {"url": "https://api.groq.com/openai/v1", "key": "GROQ_API_KEY", "model": "llama-3.3-70b-versatile",
              "label": "Groq (palier gratuit)"},
     "gemini": {"url": "https://generativelanguage.googleapis.com/v1beta/openai", "key": "GEMINI_API_KEY",
