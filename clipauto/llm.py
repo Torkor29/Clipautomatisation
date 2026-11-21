@@ -26,6 +26,8 @@ PROVIDERS = {
                  "label": "DeepSeek (≈ 0,0003 $ / clip)"},
     "openrouter": {"url": "https://openrouter.ai/api/v1", "key": "OPENROUTER_API_KEY", "model": "openrouter/free",
                    "label": "OpenRouter (modèles gratuits)"},
+    "openai": {"url": "https://api.openai.com/v1", "key": "OPENAI_API_KEY", "model": "gpt-4.1-mini",
+               "label": "OpenAI (clé API, ≈ 0,001 $ / clip)"},
     "groq": {"url": "https://api.groq.com/openai/v1", "key": "GROQ_API_KEY", "model": "llama-3.3-70b-versatile",
              "label": "Groq (palier gratuit)"},
     "gemini": {"url": "https://generativelanguage.googleapis.com/v1beta/openai", "key": "GEMINI_API_KEY",
