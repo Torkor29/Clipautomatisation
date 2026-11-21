@@ -30,8 +30,25 @@ PROVIDERS = {
              "label": "Groq (palier gratuit)"},
     "gemini": {"url": "https://generativelanguage.googleapis.com/v1beta/openai", "key": "GEMINI_API_KEY",
                "model": "gemini-2.5-flash-lite", "label": "Gemini (palier gratuit)"},
+    "vertex": {"url": "https://aiplatform.googleapis.com/v1", "key": "VERTEX_API_KEY", "model": "gemini-2.5-flash",
+               "label": "Gemini via Vertex AI (crédits Google Cloud)"},
     "ollama": {"url": "http://localhost:11434/v1", "key": None, "model": "qwen2.5:7b", "label": "Ollama (local)"},
 }
+
+
+def _vertex(prompt: str, cfg: dict, max_tokens: int) -> str:
+    """Vertex AI (utilise les crédits de l'essai Google Cloud). Clé API autorisée pour « Vertex AI API »."""
+    model = cfg.get("model") or PROVIDERS["vertex"]["model"]
+    proj = os.environ.get("VERTEX_PROJECT")
+    path = (f"projects/{proj}/locations/global/publishers/google/models/{model}" if proj
+            else f"publishers/google/models/{model}")
+    body = {"contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "systemInstruction": {"parts": [{"text": "Tu es monteur vidéo expert TikTok/Shorts. Tu réponds UNIQUEMENT en JSON valide."}]},
+            "generationConfig": {"temperature": 0.2, "maxOutputTokens": max_tokens, "responseMimeType": "application/json"}}
+    req = urllib.request.Request(f"https://aiplatform.googleapis.com/v1/{path}:generateContent?key={os.environ['VERTEX_API_KEY']}",
+                                 data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
+    out = json.loads(urllib.request.urlopen(req, timeout=90).read())
+    return "".join(p.get("text", "") for p in out["candidates"][0]["content"]["parts"])
 
 
 def available(cfg: dict) -> bool:
@@ -51,6 +68,15 @@ def call_json(prompt: str, cfg: dict, usage: dict, max_tokens: int = 600) -> dic
     if not available(cfg) or not _budget(cfg, usage):
         return None
     p = PROVIDERS[cfg["provider"]]
+    if cfg["provider"] == "vertex":
+        try:
+            txt = _vertex(prompt, cfg, max_tokens)
+            usage["calls"] += 1
+            m = re.search(r"\{.*\}", txt, re.S)
+            return json.loads(m.group(0) if m else txt)
+        except Exception as e:
+            log.warning("IA (vertex) indisponible : %s", e)
+            return None
     base = (cfg.get("ollama_url", "http://localhost:11434") + "/v1") if cfg["provider"] == "ollama" else p["url"]
     body = {"model": cfg.get("model") or p["model"], "temperature": 0.2, "max_tokens": max_tokens,
             "response_format": {"type": "json_object"},
