@@ -256,9 +256,17 @@ async function compilationModal(opts, done) {
 const statusLabel = (s) => ({ pending: "À valider", approved: "Approuvé", published: "Publié", rejected: "Rejeté", error: "Erreur" }[s] || s);
 
 /* ===================================================================== STREAMERS */
+const ago = (t) => { const m = Math.round((Date.now() / 1000 - t) / 60); return m < 60 ? `il y a ${m} min` : m < 60 * 36 ? `il y a ${Math.round(m / 60)} h` : `il y a ${Math.round(m / 1440)} jours`; };
+const hms = (s) => { const h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60); return h ? `${h} h ${String(m).padStart(2, "0")}` : `${m} min`; };
+
 async function viewStreamers(v) {
   GLOBAL = await api("/api/settings");
-  v.append(h(`<div><h1>Streamers</h1><p class="sub">Chaînes surveillées. Dès qu'une passe en live : enregistrement, lecture du chat et détection des moments forts.</p></div>`));
+  const sub = sessionStorage.getItem("stab") || "follow";
+  v.append(h(`<div><h1>Streamers</h1><p class="sub">${sub === "vods" ? "Les derniers lives terminés de tes streamers Twitch. Lance l'analyse d'un live pour en sortir les meilleurs clips et un résumé." : "Chaînes surveillées. Dès qu'une passe en live : enregistrement, lecture du chat et détection des moments forts."}</p></div>`));
+  const tabs = h(`<div class="tabs"><button data-s="follow" class="${sub === "follow" ? "on" : ""}">Suivis</button><button data-s="vods" class="${sub === "vods" ? "on" : ""}">Lives terminés</button></div>`);
+  v.append(tabs);
+  $$("button", tabs).forEach((b) => b.onclick = () => { sessionStorage.setItem("stab", b.dataset.s); route(); });
+  if (sub === "vods") return viewVods(v);
   const add = h(`<div class="card" style="margin-bottom:20px"><div class="row">
       <select id="pf" style="width:130px"><option value="twitch">Twitch</option><option value="kick">Kick</option><option value="youtube">YouTube</option></select>
       <input id="ch" type="text" placeholder="Nom de la chaîne ou lien (ex. mehdoche, https://kick.com/xqc, @Chaine)" style="flex:1;min-width:200px">
@@ -281,6 +289,55 @@ async function viewStreamers(v) {
     for (const s of st.streamers) list.append(streamerCard(s, open, render));
   }
   every(render, 4000);
+}
+
+async function viewVods(v) {
+  const list = h(`<div class="vods"><div class="empty">Chargement des derniers lives…</div></div>`); v.append(list);
+  const opts = {};
+  let sig = "";
+  async function load() {
+    let vs;
+    try { vs = await api("/api/vods"); } catch (e) { list.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+    const ns = JSON.stringify(vs.map((x) => [x.id, x.job?.status, x.job?.message, x.run?.clip_ids]));
+    if (ns === sig || $$("input:focus", list).length) return; sig = ns;
+    if (!vs.length) { list.innerHTML = `<div class="empty">Aucun live terminé trouvé. Seules les chaînes Twitch qui gardent leurs rediffusions (VOD) apparaissent ici.</div>`; return; }
+    list.innerHTML = "";
+    for (const x of vs) {
+      const o = opts[x.id] ||= { clips: 5, summary: true };
+      const j = x.job, running = j?.status === "running", done = j?.status === "done", ids = x.run?.clip_ids || [];
+      const el = h(`<div class="vod card">
+        <div class="vthumb">${x.thumb ? `<img loading="lazy" src="${esc(x.thumb)}" alt="" onerror="this.remove()">` : ""}<i>${ic("film")}</i><span>${hms(x.duration)}</span></div>
+        <div class="vbody">
+          <div class="vhead"><b>${esc(x.streamer)}</b> a streamé <span>${ago(x.start)}</span></div>
+          <div class="vtitle">${esc(x.title)}</div>
+          <div class="row" style="gap:6px;margin-top:6px">
+            <span class="pill">${hms(x.duration)}</span>
+            ${x.views != null ? `<span class="pill">${ic("eye")} ${x.views}</span>` : ""}
+            <span class="pill" title="${x.chat ? "ClipAuto a enregistré le chat pendant ce live : détection aussi précise qu'en direct" : "Live non suivi par ClipAuto : détection par le son uniquement"}">${x.chat ? `${ic("message-square")} chat enregistré` : `${ic("volume-2")} son uniquement`}</span>
+          </div>
+          ${running ? `<div class="vjob"><div class="bar"><div style="width:${Math.round((j.progress || 0) * 100)}%"></div></div><small>${ic("loader", "spin")} ${esc(j.message || "")} · ${fmt(Date.now() / 1000 - j.created)}</small></div>`
+          : done ? `<div class="vjob ok">${ic("check")} ${esc(j.message)} <a class="btn sm" href="#/clips">Voir les clips</a>${x.run?.summary_id ? `<a class="btn sm" href="#/edit/${x.run.summary_id}">Voir le résumé</a>` : ""}</div>`
+          : j?.status === "error" ? `<div class="vjob err">${ic("triangle-alert")} ${esc(j.message)}</div>` : ""}
+          ${running ? "" : `<div class="vgo">
+            <label class="inline">Clips <input type="number" min="1" max="20" value="${o.clips}" data-n style="width:70px"></label>
+            <label class="inline"><input type="checkbox" data-s ${o.summary ? "checked" : ""}> Résumé du live</label>
+            <button class="btn ${done ? "" : "pri"} sm" data-go>${ic("sparkles")} ${done || j?.status === "error" ? "Relancer" : "Trouver les moments forts"}</button>
+          </div>`}
+        </div></div>`);
+      const go = $("[data-go]", el);
+      if (go) {
+        $("[data-n]", el).oninput = (e) => { o.clips = Number(e.target.value) || 5; };
+        $("[data-s]", el).onchange = (e) => { o.summary = e.target.checked; };
+        go.onclick = async () => {
+          go.disabled = true;
+          try { await api(`/api/vods/${x.id}/analyse`, { method: "POST", json: { streamer_id: x.streamer_id, clips: o.clips, summary: o.summary } }); toast(`Analyse du live de ${x.streamer} lancée`); sig = ""; load(); }
+          catch (e) { toast(e.message); go.disabled = false; }
+        };
+      }
+      list.append(el);
+    }
+  }
+  every(load, 4000);
 }
 
 function streamerCard(s, open, rerender) {

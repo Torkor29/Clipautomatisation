@@ -106,6 +106,8 @@ class DB:
             source TEXT, path TEXT, thumb TEXT, score REAL, detail TEXT, transcript TEXT,
             words TEXT, edit TEXT, title TEXT, duration REAL, origin TEXT DEFAULT 'live',
             status TEXT DEFAULT 'pending', render_status TEXT DEFAULT 'none', post_id TEXT, error TEXT);
+        CREATE TABLE IF NOT EXISTS vod_runs(vod_id TEXT PRIMARY KEY, streamer TEXT, job_id INTEGER,
+            clip_ids TEXT DEFAULT '[]', summary_id INTEGER, created REAL);
         CREATE TABLE IF NOT EXISTS jobs(id INTEGER PRIMARY KEY, created REAL, kind TEXT, label TEXT,
             status TEXT, progress REAL DEFAULT 0, message TEXT);
         """)
@@ -206,6 +208,21 @@ class DB:
     def delete_clip(self, cid: int) -> None:
         with self.lock:
             self.c.execute("DELETE FROM clips WHERE id=?", (cid,))
+            self.c.commit()
+
+    # ---- analyses de VOD
+    def vod_run(self, vod_id: str) -> dict | None:
+        r = self.c.execute("SELECT * FROM vod_runs WHERE vod_id=?", (vod_id,)).fetchone()
+        return {**dict(r), "clip_ids": json.loads(r["clip_ids"] or "[]")} if r else None
+
+    def save_vod_run(self, vod_id: str, **kw) -> None:
+        with self.lock:
+            self.c.execute("INSERT OR IGNORE INTO vod_runs(vod_id, created) VALUES(?,?)", (vod_id, time.time()))
+            if "clip_ids" in kw:
+                kw["clip_ids"] = json.dumps(kw["clip_ids"])
+            if kw:
+                self.c.execute(f"UPDATE vod_runs SET {','.join(f'{k}=?' for k in kw)} WHERE vod_id=?",
+                               (*kw.values(), vod_id))
             self.c.commit()
 
     # ---- jobs (imports, rendus)

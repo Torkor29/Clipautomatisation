@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 import time
@@ -29,7 +30,7 @@ def effective_settings(settings: dict, overrides: dict) -> dict:
     if extra_kw:
         out["detect"]["keywords"] = list(dict.fromkeys(list(settings["detect"]["keywords"]) + list(extra_kw)))
     return out
-from .detector import Detector, Lexicon, robust_z
+from .detector import Detector, Lexicon, robust_z  # noqa: F401
 from .monitor import LiveMonitor
 from .recorder import Recorder
 from .review import make_review
@@ -75,7 +76,8 @@ class Session:
         self.clip_times: list[float] = []
         self.chat_msgs = 0
         self.chat_log: deque = deque(maxlen=5000)
-        self.pending: dict | None = None  # clip en préparation (on y ajoute les pics qui suivent de près)  # (t, user, texte) pour expliquer les clips
+        self.pending: dict | None = None
+        self._chatf = None  # clip en préparation (on y ajoute les pics qui suivent de près)  # (t, user, texte) pour expliquer les clips
 
     def cfg(self) -> dict:
         return effective_settings(self.eng.db.settings(), self.row.get("overrides") or {})
@@ -97,6 +99,15 @@ class Session:
     def _on_msg(self, t, user, text):
         self.chat_msgs += 1
         self.chat_log.append((t, user, text))
+        try:  # chat gardé sur disque : réutilisé pour analyser la VOD après le live
+            if self._chatf is None:
+                d = self.eng.data / "chatlogs"
+                d.mkdir(parents=True, exist_ok=True)
+                self._chatf = open(d / f"{self.streamer.platform}_{self.streamer.channel.lower()}_{int(self.started)}.jsonl",
+                                   "a", encoding="utf-8")
+            self._chatf.write(json.dumps([round(t, 2), user, text[:300]], ensure_ascii=False) + "\n")
+        except OSError:
+            pass
         self.det.add_message(t, user, text)
 
     async def start(self) -> None:
@@ -194,6 +205,8 @@ class Session:
 
     async def close(self) -> None:
         self.stop.set()
+        if self._chatf:
+            self._chatf.close()
         for t in self.tasks:
             t.cancel()
         await self.rec.stop()
@@ -418,6 +431,65 @@ class Engine:
         else:
             best = sorted(rows, key=lambda c: -c["created"])[:n]
         return [c["id"] for c in sorted(best, key=lambda c: c["created"])]  # ordre chronologique
+
+    # ---------- lives terminés (VOD Twitch)
+    async def analyse_vod(self, jid: int, vod: dict, row: dict, n: int, summary: bool, limit: int | None = None) -> None:
+        from . import vods
+        from .story import _interp
+        cfg = effective_settings(self.db.settings(), row.get("overrides") or {})
+        work = self.data / "vods" / vod["id"]
+        say = lambda m, pr: self.db.update_job(jid, message=m, progress=pr)
+        self.db.save_vod_run(vod["id"], streamer=row["channel"], job_id=jid)
+        try:
+            dur = min(vod["duration"], limit or vod["duration"])
+            say("téléchargement du son du live…", 0.05)
+            audio_f = await vods.download_audio(vod["url"], work / "audio", limit)
+            say("analyse du son…", 0.25)
+            audio = await asyncio.to_thread(vods.loudness, audio_f)
+            audio_f.unlink(missing_ok=True)
+            chat = vods.chat_for(self.data, "twitch", row["channel"], vod["start"], vod["start"] + dur)
+            chat_rel = [(t - vod["start"], u, m) for t, u, m in chat]
+            reaction = float(cfg["detect"]["chat_delay_seconds"]) if chat else 0.0
+            say(f"détection ({len(chat)} messages du chat, {'avec' if chat else 'sans'} chat)…", 0.35)
+            moments, curve = await asyncio.to_thread(vods.find_moments, audio, chat_rel, dur, n, cfg, reaction)
+            if not moments:
+                raise RuntimeError("aucun moment fort trouvé")
+            ids = []
+            for i, mo in enumerate(moments):
+                say(f"clip {i + 1}/{len(moments)} : téléchargement du passage…", 0.4 + 0.5 * i / len(moments))
+                a, b = mo["peaks"][0] - 60, mo["peaks"][-1] + 40
+                src = await vods.download_section(vod["url"], a, b, self.data / "clips" / f"vod{vod['id']}_{int(mo['t'])}" / "source.mp4")
+                t_src = max(a, 0)
+                lex = Lexicon(cfg["detect"]["laugh_words"], cfg["detect"]["hype_words"], cfg["detect"]["keywords"])
+                msgs = [(t, u, m) for t, u, m in chat_rel if mo["t"] - 20 <= t - reaction <= mo["t"] + 15][:60]
+                detail = {"z": mo["z"], "reaction": reaction, "threshold": cfg["detect"]["threshold"],
+                          "vod": {"id": vod["id"], "title": vod["title"], "at": round(mo["t"])},
+                          "chat": [{"t": round(t - reaction - mo["t"], 1), "u": u, "m": m[:200],
+                                    "tag": (lambda c: "mot-clé" if c[2] else "rire" if c[0] else "hype" if c[1] else "")(lex.classify(m))}
+                                   for t, u, m in msgs],
+                          "curve": [[round(t - mo["t"], 1), sc] for t, sc in curve if mo["t"] - 300 <= t <= mo["t"]]}
+                c = [(round(t - t_src, 1), sc) for t, sc in curve if a - 5 <= t <= b + 5]
+                cid = await self.new_clip(src, peak=mo["t"] - t_src, streamer=row["channel"], platform="twitch",
+                                          score=mo["score"], detail=detail, cfg=cfg, origin="vod",
+                                          peaks=[p - t_src for p in mo["peaks"]], curve=c,
+                                          progress=lambda m_, i=i: say(f"clip {i + 1}/{len(moments)} : {m_}", 0.4 + 0.5 * i / len(moments)))
+                ids.append(cid)
+                self.db.save_vod_run(vod["id"], clip_ids=ids)
+            sid = None
+            if summary and len(ids) >= 2:
+                say("création du résumé du live…", 0.93)
+                cj = self.db.add_job("compilation", f"Résumé du live de {row['channel']}")
+                c = cfg["compilation"]
+                await self.build_compilation(cj, ids, f"Le résumé du live de {row['channel']} 🔥", c["transition"],
+                                             c["transition_duration"], c["max_each"])
+                last = self.db.clips(limit=1)
+                sid = last[0]["id"] if last and last[0]["origin"] == "compilation" else None
+            self.db.save_vod_run(vod["id"], clip_ids=ids, summary_id=sid)
+            self.db.update_job(jid, status="done", progress=1,
+                               message=f"{len(ids)} clips créés" + (" + résumé" if sid else ""))
+        except Exception as ex:
+            log.exception("analyse VOD")
+            self.db.update_job(jid, status="error", message=str(ex)[-300:])
 
     # ---------- import (VOD Twitch/Kick/YouTube ou fichier)
     async def import_video(self, jid: int, path: Path | None, url: str | None, opts: dict) -> None:

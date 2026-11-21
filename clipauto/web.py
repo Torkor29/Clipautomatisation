@@ -384,6 +384,46 @@ def create_app(data_dir: Path | None = None, start_engine: bool = True) -> FastA
             raise HTTPException(400)
         return FileResponse(ovl.emoji_png(c, data), media_type="image/png")
 
+    @app.get("/api/vods")
+    async def list_vods():
+        from . import vods
+        from .monitor import TwitchAPI
+        cid, sec = os.environ.get("TWITCH_CLIENT_ID"), os.environ.get("TWITCH_CLIENT_SECRET")
+        if not (cid and sec):
+            raise HTTPException(400, "identifiants Twitch manquants")
+        tw = TwitchAPI(cid, sec)
+        out = []
+        for r in eng.db.streamers():
+            if r["platform"] != "twitch":
+                continue
+            try:
+                vl = await vods.twitch_vods(tw, r["channel"], 2)
+            except Exception as e:
+                log.warning("VOD %s : %s", r["channel"], e)
+                vl = []
+            for v in vl:
+                run = eng.db.vod_run(v["id"])
+                job = next((j for j in eng.db.jobs(200) if run and j["id"] == run["job_id"]), None)
+                has_chat = bool(vods.chat_for(eng.data, "twitch", r["channel"], v["start"], v["start"] + min(v["duration"], 900)))
+                out.append({**v, "streamer": r["channel"], "streamer_id": r["id"], "chat": has_chat,
+                            "run": run, "job": job})
+        return sorted(out, key=lambda x: -x["start"])
+
+    @app.post("/api/vods/{vod_id}/analyse")
+    async def analyse_vod(vod_id: str, streamer_id: int = Body(...), clips: int = Body(5), summary: bool = Body(True)):
+        from . import vods
+        from .monitor import TwitchAPI
+        row = next((r for r in eng.db.streamers() if r["id"] == streamer_id), None)
+        if not row:
+            raise HTTPException(404, "streamer inconnu")
+        tw = TwitchAPI(os.environ["TWITCH_CLIENT_ID"], os.environ["TWITCH_CLIENT_SECRET"])
+        vod = next((v for v in await vods.twitch_vods(tw, row["channel"], 5) if v["id"] == vod_id), None)
+        if not vod:
+            raise HTTPException(404, "VOD introuvable (supprimée ou privée ?)")
+        jid = eng.db.add_job("vod", f"Live de {row['channel']} — {vod['title'][:60]}")
+        bg(eng.analyse_vod(jid, vod, row, max(1, min(int(clips), 20)), bool(summary)))
+        return {"job": jid}
+
     @app.get("/api/jobs")
     def jobs():
         return eng.db.jobs()
