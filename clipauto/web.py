@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from .captions import BASE, FONTS, LINE_ANIMS, PRESETS, SFX, WORD_ANIMS, em_ratio
 from .clipper import EFFECTS, TRANSITIONS
 from .config import load_dotenv
-from .db import DEFAULT_SETTINGS
+from .db import DEFAULT_SETTINGS, PROFILES, profile_values
 from .engine import Engine
 
 log = logging.getLogger(__name__)
@@ -114,7 +114,7 @@ def create_app(data_dir: Path | None = None, start_engine: bool = True) -> FastA
 
     @app.get("/api/meta")
     def meta():
-        return {"fonts": list(FONTS), "presets": PRESETS, "defaults": DEFAULT_SETTINGS, "platforms": PLATFORMS,
+        return {"profiles": PROFILES, "fonts": list(FONTS), "presets": PRESETS, "defaults": DEFAULT_SETTINGS, "platforms": PLATFORMS,
                 "transitions": TRANSITIONS, "effects": EFFECTS, "caption_base": BASE,
                 "font_ratio": {f: em_ratio(f) for f in FONTS}, "word_anims": WORD_ANIMS,
                 "line_anims": LINE_ANIMS, "sfx": SFX, "ovl_anims": ovl.ANIM_IN}
@@ -130,6 +130,14 @@ def create_app(data_dir: Path | None = None, start_engine: bool = True) -> FastA
         eng.settings_changed()
         return s
 
+    @app.post("/api/settings/profile")
+    def set_profile(name: str = Body(..., embed=True)):
+        if name not in PROFILES:
+            raise HTTPException(400, "profil inconnu")
+        s2 = eng.db.save_settings({"profile": name, **profile_values(name)})
+        eng.settings_changed()
+        return s2
+
     @app.post("/api/settings/reset")
     def reset_settings(section: str = Body(..., embed=True)):
         if section not in DEFAULT_SETTINGS:
@@ -141,10 +149,8 @@ def create_app(data_dir: Path | None = None, start_engine: bool = True) -> FastA
     # ------------------------------------------------------------ streamers
     @app.post("/api/streamers")
     def add_streamer(platform: str = Body(...), channel: str = Body(...)):
-        channel = channel.strip()
-        for pre in ("https://", "http://", "www.", "twitch.tv/", "kick.com/", "youtube.com/"):
-            channel = channel.replace(pre, "")
-        channel = channel.strip("/")
+        from .db import clean_channel
+        channel = clean_channel(platform, channel)
         if platform not in PLATFORMS or not channel:
             raise HTTPException(400, "plateforme ou chaîne invalide")
         eng.db.add_streamer(platform, channel)

@@ -72,7 +72,7 @@ function showLogin() {
 function toast(msg, ms = 2600) {
   const d = h(`<div>${esc(msg)}</div>`); $("#toast").append(d); setTimeout(() => d.remove(), ms);
 }
-let META = null, timers = [];
+let META = null, GLOBAL = null, timers = [];
 window.addEventListener("error", (e) => toast(`Erreur : ${e.message}`, 6000));
 window.addEventListener("unhandledrejection", (e) => toast(`Erreur : ${e.reason?.message || e.reason}`, 6000));
 function every(fn, ms) { fn(); timers.push(setInterval(fn, ms)); }
@@ -257,6 +257,7 @@ const statusLabel = (s) => ({ pending: "À valider", approved: "Approuvé", publ
 
 /* ===================================================================== STREAMERS */
 async function viewStreamers(v) {
+  GLOBAL = await api("/api/settings");
   v.append(h(`<div><h1>Streamers</h1><p class="sub">Chaînes surveillées. Dès qu'une passe en live : enregistrement, lecture du chat et détection des moments forts.</p></div>`));
   const add = h(`<div class="card" style="margin-bottom:20px"><div class="row">
       <select id="pf" style="width:130px"><option value="twitch">Twitch</option><option value="kick">Kick</option><option value="youtube">YouTube</option></select>
@@ -291,7 +292,7 @@ function streamerCard(s, open, rerender) {
         <div class="row" style="gap:8px"><b style="font-size:16px">${esc(s.channel)}</b><span class="pill">${s.platform}</span>
           ${s.live ? `<span class="pill" style="color:var(--live)"><span class="dot live"></span>EN LIVE</span>` : `<span class="pill">hors ligne</span>`}
           ${!s.enabled ? `<span class="pill">en pause</span>` : ""}
-          ${Object.keys(s.overrides || {}).length ? `<span class="pill" style="color:var(--acc)">réglages perso</span>` : ""}</div>
+          <span class="pill">${s.overrides?.profile ? esc(META.profiles[s.overrides.profile]?.label || "perso") : "global"}${s.overrides?.detect?.keywords?.length ? ` · ${s.overrides.detect.keywords.length} mot${s.overrides.detect.keywords.length > 1 ? "s" : ""}-clé` : ""}</span></div>
         ${ss ? `<div style="color:var(--mute);font-size:13px;margin-top:4px">${esc(ss.title || "")} · ${ic("eye")} ${ss.viewers ?? "?"} · ${ic("message-square")} ${ss.chat_msgs} msgs · depuis ${fmt((Date.now() / 1000 - ss.since))}</div>` : ""}
       </div>
       <div class="row" style="gap:6px">
@@ -311,24 +312,30 @@ function streamerCard(s, open, rerender) {
   if (open.has(s.id)) {
     const o = s.overrides || {}, d = o.detect || {};
     const box = $(".ovr", el);
-    box.innerHTML = `<h3>Réglages propres à ${esc(s.channel)} (vides = réglages globaux)</h3>
-      <div class="grid2">
-        <label class="f"><b>Seuil de déclenchement</b><input type="number" step="0.1" data-k="threshold" value="${d.threshold ?? ""}"><small>Plus bas = plus de clips</small></label>
-        <label class="f"><b>Délai du chat (s)</b><input type="number" data-k="chat_delay_seconds" value="${d.chat_delay_seconds ?? ""}"><small>Retard moyen entre l'action et la réaction du chat</small></label>
-        <label class="f"><b>Mots-clés en plus</b><input type="text" data-k="keywords" value="${esc((d.keywords || []).join(", "))}"><small>Ex. noms de persos, « clip », expressions de la commu</small></label>
-        <label class="f"><b>Max clips / heure</b><input type="number" data-k="max_clips_per_hour" value="${d.max_clips_per_hour ?? ""}"></label>
+    const P = META.profiles, G = GLOBAL || {}, gp = P[G.profile]?.label || "Personnalisé";
+    const cur = o.profile || "";
+    const opt = (k, title, desc) => `<label class="popt ${cur === k ? "on" : ""}"><input type="radio" name="pf${s.id}" value="${k}" ${cur === k ? "checked" : ""}>
+      <span><b>${title}</b><small>${desc}</small></span></label>`;
+    box.innerHTML = `<h3>Détection pour ${esc(s.channel)}</h3>
+      <div class="popts">
+        ${opt("", `Comme le réglage global <em>(${esc(gp)})</em>`, "Recommandé : tu règles tout une fois dans Réglages.")}
+        ${Object.entries(P).map(([k, v]) => opt(k, v.label, v.desc)).join("")}
       </div>
-      <div class="row"><button class="btn pri sm" data-x="save">Enregistrer</button><button class="btn sm" data-x="clr">Revenir aux réglages globaux</button></div>`;
+      <label class="f" style="margin-top:14px"><b>Mots-clés propres à ce streamer</b>
+        <input type="text" data-kw value="${esc((d.keywords || []).join(", "))}" placeholder="noms de persos, gimmicks, « clip »…">
+        <small>S'ajoutent aux mots-clés globaux (${(G.detect?.keywords || []).length ? esc(G.detect.keywords.join(", ")) : "aucun"}).</small></label>
+      <div class="row"><button class="btn pri sm" data-x="save">${ic("save")} Enregistrer</button>
+        ${Object.keys(o).length ? `<button class="btn sm" data-x="clr">Tout remettre comme le global</button>` : ""}</div>`;
+    $$(".popt input", box).forEach((r) => r.onchange = () => $$(".popt", box).forEach((l) => l.classList.toggle("on", l.contains(r) && r.checked)));
     $('[data-x="save"]', box).onclick = async () => {
-      const det = {};
-      $$("[data-k]", box).forEach((i) => {
-        const k = i.dataset.k, val = i.value.trim(); if (val === "") return;
-        det[k] = k === "keywords" ? val.split(",").map((x) => x.trim()).filter(Boolean) : Number(val);
-      });
-      await api(`/api/streamers/${s.id}`, { method: "PATCH", json: { overrides: Object.keys(det).length ? { detect: det } : {} } });
-      toast("Réglages enregistrés (appliqués à chaud)"); rerender(true);
+      const prof = $(".popt input:checked", box)?.value || "";
+      const kw = $("[data-kw]", box).value.split(",").map((x) => x.trim()).filter(Boolean);
+      const ov = {}; if (prof) ov.profile = prof; if (kw.length) ov.detect = { keywords: kw };
+      await api(`/api/streamers/${s.id}`, { method: "PATCH", json: { overrides: ov } });
+      toast(prof ? `${s.channel} : profil « ${P[prof].label} »` : `${s.channel} suit le réglage global`); open.delete(s.id); rerender(true);
     };
-    $('[data-x="clr"]', box).onclick = async () => { await api(`/api/streamers/${s.id}`, { method: "PATCH", json: { overrides: {} } }); rerender(true); };
+    const clr = $('[data-x="clr"]', box);
+    if (clr) clr.onclick = async () => { await api(`/api/streamers/${s.id}`, { method: "PATCH", json: { overrides: {} } }); toast(`${s.channel} suit de nouveau le réglage global`); open.delete(s.id); rerender(true); };
   }
   return el;
 }
@@ -401,6 +408,16 @@ async function viewSettings(v) {
   v.append(h(`<div class="row"><div><h1>Réglages</h1><p class="sub">Appliqués à chaud aux lives en cours. Chaque streamer peut avoir ses propres réglages (page Streamers → ${ic("settings")}).</p></div>
     <div class="spacer"></div><button class="btn pri" id="sv">${ic("save")} Enregistrer</button></div>`));
   const d = S.detect, c = S.clip, p = S.publish;
+  const prof = h(`<div class="card" style="margin-bottom:16px">
+    <h2>${ic("sliders-horizontal")} Combien de clips veux-tu ?</h2>
+    <p style="color:var(--mute);margin:-6px 0 14px">Choisis un profil : il règle tout seul la sensibilité, le nombre de clips par heure et le score minimum. Un clic l'applique tout de suite. Chaque streamer suit ce profil, sauf si tu lui en donnes un autre (page Streamers → ${ic("settings")}).</p>
+    <div class="popts row3">${Object.entries(META.profiles).map(([k, v]) => `<button class="popt ${S.profile === k ? "on" : ""}" data-prof="${k}"><span><b>${v.label}${k === "equilibre" ? " · recommandé" : ""}</b><small>${v.desc}</small>
+      <small class="pvals">seuil ${v.detect.threshold} · ${v.detect.min_signals} ${v.detect.min_signals > 1 ? "signaux" : "signal"} · max ${v.detect.max_clips_per_hour}/h · score ≥ ${v.clip.min_viral}</small></span></button>`).join("")}</div>
+    ${META.profiles[S.profile] ? "" : `<p class="pill" style="margin-top:10px">Réglages personnalisés (modifiés à la main ci-dessous)</p>`}
+  </div>`);
+  v.append(prof);
+  $$("[data-prof]", prof).forEach((b) => b.onclick = async () => { await api("/api/settings/profile", { method: "POST", json: { name: b.dataset.prof } }); toast(`Profil « ${META.profiles[b.dataset.prof].label} » appliqué`); route(); });
+  v.append(h(`<h3 style="margin-top:8px">Réglages avancés <span style="text-transform:none;letter-spacing:0;font-weight:400">— modifier ici fait passer en « personnalisé »</span></h3>`));
   const names = { chat_rate: "Activité du chat", unique_chatters: "Viewers qui écrivent", laugh_emotes: "Rires (KEKW, 😂, mdr…)", hype_emotes: "Hype (Pog, W, …)", keywords: "Vos mots-clés", audio: "Pics de volume" };
   const g = h(`<div class="grid2">
    <div class="card"><h2>${ic("crosshair")} Détection des moments forts</h2>
@@ -484,6 +501,8 @@ async function viewSettings(v) {
       ks.slice(0, -1).forEach((k) => o = o[k] ??= {}); o[ks.at(-1)] = val;
     });
     out.style = style; out.layout = { ...S.layout, mode: layout.mode }; out.hook = hook;
+    const pv = META.profiles[S.profile];
+    if (pv && (out.detect?.threshold !== pv.detect.threshold || out.detect?.min_signals !== pv.detect.min_signals || out.clip?.min_viral !== pv.clip.min_viral || out.detect?.max_clips_per_hour !== pv.detect.max_clips_per_hour || out.detect?.cooldown_seconds !== pv.detect.cooldown_seconds)) out.profile = "custom";
     await api("/api/settings", { method: "PUT", json: out }); toast("Réglages enregistrés");
   };
 }

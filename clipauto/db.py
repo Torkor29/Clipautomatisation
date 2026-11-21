@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import re
 import json
 import sqlite3
 import threading
@@ -11,6 +12,7 @@ from pathlib import Path
 from .detector import DEFAULT_HYPE, DEFAULT_LAUGH, DEFAULT_WEIGHTS
 
 DEFAULT_SETTINGS = {
+    "profile": "equilibre",
     "poll_seconds": 120,
     "record": {"quality": "1080p60,1080p,720p60,720p,best", "segment_seconds": 10, "buffer_minutes": 15},
     "detect": {
@@ -45,6 +47,40 @@ DEFAULT_SETTINGS = {
 }
 
 
+# Profils de détection : 3 réglages tout faits. Un streamer peut suivre le profil global ou en choisir un.
+PROFILES = {
+    "prudent": {"label": "Prudent", "desc": "Peu de clips, seulement les très gros moments. Idéal pour les gros streamers au chat très actif.",
+                "detect": {"threshold": 2.8, "min_signals": 2, "cooldown_seconds": 150, "max_clips_per_hour": 6},
+                "clip": {"min_viral": 50}},
+    "equilibre": {"label": "Équilibré", "desc": "Recommandé. Les moments où le chat et le son s'emballent vraiment ensemble.",
+                  "detect": {"threshold": 2.0, "min_signals": 2, "cooldown_seconds": 90, "max_clips_per_hour": 12},
+                  "clip": {"min_viral": 35}},
+    "genereux": {"label": "Généreux", "desc": "Beaucoup de clips, à trier ensuite. Utile pour les petits streamers ou un premier test.",
+                 "detect": {"threshold": 1.4, "min_signals": 1, "cooldown_seconds": 60, "max_clips_per_hour": 20},
+                 "clip": {"min_viral": 20}},
+}
+
+
+def profile_values(name: str | None) -> dict:
+    p = PROFILES.get(name or "")
+    return {"detect": dict(p["detect"]), "clip": dict(p["clip"])} if p else {}
+
+
+def clean_channel(platform: str, raw: str) -> str:
+    """« https://www.twitch.tv/michou/clip/xyz?x=1 » → « michou » ; YouTube garde @nom ou l'id de chaîne."""
+    c = raw.strip()
+    c = re.sub(r"^https?://", "", c)
+    c = re.sub(r"^(www\.|m\.)", "", c)
+    c = re.sub(r"^(twitch\.tv|kick\.com|youtube\.com)/", "", c, flags=re.I)
+    c = c.split("?")[0].split("#")[0].strip("/")
+    if platform == "youtube":
+        parts = c.split("/")
+        if parts[0] in ("channel", "c", "user") and len(parts) > 1:
+            return parts[1]
+        return parts[0]
+    return c.split("/")[0].lstrip("@").lower()
+
+
 def deep_merge(base: dict, over: dict) -> dict:
     out = copy.deepcopy(base)
     for k, v in (over or {}).items():
@@ -74,6 +110,14 @@ class DB:
             status TEXT, progress REAL DEFAULT 0, message TEXT);
         """)
         self.c.commit()
+        for r in self.c.execute("SELECT id, platform, channel FROM streamers").fetchall():
+            fixed = clean_channel(r["platform"], r["channel"])
+            if fixed and fixed != r["channel"]:
+                try:
+                    self.c.execute("UPDATE streamers SET channel=? WHERE id=?", (fixed, r["id"]))
+                except sqlite3.IntegrityError:  # doublon : on supprime le mauvais
+                    self.c.execute("DELETE FROM streamers WHERE id=?", (r["id"],))
+        self.c.commit()
 
     # ---- réglages
     def settings(self) -> dict:
@@ -97,7 +141,7 @@ class DB:
         with self.lock:
             cur = self.c.execute(
                 "INSERT OR IGNORE INTO streamers(platform,channel,overrides,created) VALUES(?,?,?,?)",
-                (platform, channel.strip().lstrip("@") if platform != "youtube" else channel.strip(),
+                (platform, clean_channel(platform, channel),
                  json.dumps(overrides or {}), time.time()))
             self.c.commit()
             return cur.lastrowid

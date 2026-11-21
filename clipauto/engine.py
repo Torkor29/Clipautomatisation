@@ -14,7 +14,21 @@ from collections import deque
 from .audio import segment_loudness
 from .chat import kick_chat, twitch_chat
 from .config import Streamer
-from .db import DB, deep_merge
+from .db import DB, deep_merge, profile_values
+
+
+def effective_settings(settings: dict, overrides: dict) -> dict:
+    """Priorité : réglages globaux  <  profil choisi pour ce streamer  <  réglages avancés du streamer.
+    Les mots-clés du streamer s'AJOUTENT à ceux du global."""
+    import copy
+    o = copy.deepcopy(overrides or {})
+    prof = o.pop("profile", None)
+    out = deep_merge(settings, profile_values(prof)) if prof else settings
+    extra_kw = (o.get("detect") or {}).pop("keywords", None) if o.get("detect") else None
+    out = deep_merge(out, o)
+    if extra_kw:
+        out["detect"]["keywords"] = list(dict.fromkeys(list(settings["detect"]["keywords"]) + list(extra_kw)))
+    return out
 from .detector import Detector, Lexicon, robust_z
 from .monitor import LiveMonitor
 from .recorder import Recorder
@@ -63,7 +77,7 @@ class Session:
         self.chat_log: deque = deque(maxlen=5000)  # (t, user, texte) pour expliquer les clips
 
     def cfg(self) -> dict:
-        return deep_merge(self.eng.db.settings(), self.row.get("overrides") or {})
+        return effective_settings(self.eng.db.settings(), self.row.get("overrides") or {})
 
     def _detector(self, cfg: dict) -> Detector:
         d = cfg["detect"]

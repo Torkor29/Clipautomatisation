@@ -412,3 +412,17 @@ body.is-login>*:not(#login):not(script){display:none!important}
   .stat{padding:12px 14px}.stat b{font-size:24px}
 }
 @media (max-width:900px){ main>.row:first-child>.btn{flex:1} }
+
+/* ---------- profils de détection */
+.popts{display:grid;gap:8px}
+.popts.row3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.popt{all:unset;box-sizing:border-box;display:flex;gap:10px;align-items:flex-start;cursor:pointer;background:var(--s1);border:1px solid var(--line);border-radius:10px;padding:12px 14px;transition:border-color .12s}
+.popt:hover{border-color:var(--s7)}
+.popt.on{border-color:var(--text);box-shadow:0 0 0 1px var(--text)}
+.popt input{margin-top:2px}
+.popt span{display:grid;gap:3px}
+.popt b{font-weight:600;font-size:13.5px}
+.popt b em{font-style:normal;color:var(--mute);font-weight:400}
+.popt small{color:var(--mute);font-size:12.5px;line-height:1.4}
+.popt .pvals{color:var(--faint);font:11px "Geist Mono",monospace}
+@media (max-width:900px){.popts.row3{grid-template-columns:1fr}}
