@@ -231,6 +231,12 @@ class Engine:
         detail = {**detail, "title_options": title_opts, "analysis": analysis, "signals": virality.explain_signals(detail),
                   "signal_score": sig, "llm": llm, "viral": viral, "peak_src": round(peak, 2)}
         layout = dict(cfg["layout"])
+        vw, vh = await clipper.probe_size(src)
+        vertical = vh > vw * 1.4
+        if vertical:  # déjà en 9:16 : on garde l'image entière
+            layout["mode"] = "fill"
+            layout["focus"] = {"x": 0.5}
+            detail["vertical_source"] = True
         if layout.get("mode") in ("split", "pip") and layout.get("auto_facecam", True):
             fc = await asyncio.to_thread(facecam.detect, src)
             if fc:
@@ -242,7 +248,9 @@ class Engine:
         thumb = await clipper.thumbnail(src, min(peak, total - 0.5), src.parent / "thumb.jpg")
         cid = self.db.add_clip(streamer=streamer, platform=platform, source=str(src), thumb=str(thumb),
                                score=score, detail=detail, transcript=" ".join(w["w"] for w in kept),
-                               words=words, edit={**default_edit(cfg, (t0, t1), title), "layout": layout},
+                               words=words, edit={**default_edit(cfg, (t0, t1), title), "layout": layout,
+                                                  # une vidéo verticale a souvent déjà ses sous-titres incrustés
+                                                  **({"captions": False} if vertical else {})},
                                title=title, duration=t1 - t0, origin=origin,
                                status="rejected" if rejected else "pending",
                                error=f"Écarté automatiquement : score viral {viral} < minimum {min_v}" if rejected else None)

@@ -58,10 +58,45 @@ def quotes(words: list[dict]) -> list[tuple[float, str]]:
     return sorted(out, reverse=True)
 
 
+METHOD = re.compile(r"\b(?:la|ma|une|cette)\s+(m[ée]thode|technique|formule|astuce|r[èe]gle|strat[ée]gie|recette)\s+"
+                    r"(du|de la|des|de l'|d'|de)\s*([\w'’-]+(?:\s+[\w'’-]+)?)", re.I)
+
+
+def own_hook(words: list[dict]) -> list[tuple[float, str]]:
+    """La question / phrase d'accroche dite au DÉBUT : c'est souvent le meilleur titre (le créateur l'a écrite pour ça)."""
+    kept = [w for w in words if not w.get("skip")]
+    if not kept:
+        return []
+    t0 = kept[0]["s"]
+    text = " ".join(w["w"] for w in kept if w["s"] < t0 + 12)
+    out = []
+    for i, s in enumerate(re.split(r"(?<=[.!?])\s+", text)[:3]):
+        s = _clean_sentence(s)
+        n = len(s.split())
+        if s.endswith("?") and 4 <= n <= 16:
+            out.append((9 - i, s))
+        elif s.endswith("!") and 3 <= n <= 10:
+            out.append((6 - i, s))
+    return out
+
+
+def topic(words: list[dict]) -> list[tuple[float, str]]:
+    text = " ".join(w["w"] for w in words if not w.get("skip"))
+    out = []
+    m = METHOD.search(text)
+    if m:
+        name = f"{m.group(1).lower()} {m.group(2).lower()} {m.group(3).strip()}".replace("d' ", "d'").replace("de l' ", "de l'")
+        name = re.sub(r"\s+", " ", name)
+        out.append((7, f"La {name} 🎯"))
+        out.append((5, f"La {name}, expliquée en 1 minute"))
+    return out
+
+
 def suggest(words: list[dict], streamer: str, detail: dict, game: str | None = None) -> list[str]:
     S = (streamer[:1].upper() + streamer[1:]) if streamer else "Il"
     z = detail.get("z") or {}
-    cands: list[tuple[float, str]] = []
+    live = any(k in z for k in ("chat_rate", "unique_chatters", "laugh_emotes", "hype_emotes"))  # vrai live (chat)
+    cands: list[tuple[float, str]] = own_hook(words) + topic(words)
     for sc, q in quotes(words)[:3]:
         cands.append((sc + 2, q + (" 😂" if z.get("laugh_emotes", 0) > 2 else " 😳")))
     toks = {re.sub(r"[^\w'’-]", "", w["w"].lower()) for w in words if not w.get("skip")}
@@ -72,16 +107,18 @@ def suggest(words: list[dict], streamer: str, detail: dict, game: str | None = N
         cands += [(4 + z["laugh_emotes"] / 3 - i * .4, t) for i, t in enumerate(LAUGH)]
     if max(z.get("chat_rate", 0), z.get("unique_chatters", 0), z.get("hype_emotes", 0)) >= 1.5:
         cands += [(3.5 - i * .4, t) for i, t in enumerate(HYPE)]
-    if z.get("audio", 0) >= 1.5:
+    emo = sum(t in EMOTION for t in toks)
+    if (live and z.get("audio", 0) >= 1.5) or (z.get("audio", 0) >= 3 and emo >= 3):
         cands += [(3.2 - i * .4, t) for i, t in enumerate(SHOUT)]
     if game:
         g = re.sub(r"Grand Theft Auto", "GTA", game).replace(" V", " 5").strip()
         cands.append((2.5, f"{S} sur {g}… 😳"))
-    cands += [(1 - i * .3, t) for i, t in enumerate(CALM)]
+    if live:
+        cands += [(1 - i * .3, t) for i, t in enumerate(CALM)]
     seen, out = set(), []
     for _, t in sorted(cands, key=lambda x: -x[0]):
         t = _nbsp(t.replace("{S}", S))
-        if t.lower() not in seen and len(t) <= 60:
+        if t.lower() not in seen and len(t) <= 100:
             seen.add(t.lower())
             out.append(t)
     return out[:8]

@@ -13,3 +13,9 @@ def test_quote_must_be_full_short_sentence():
 def test_templates_follow_signals():
     t = suggest(_w("ok"), "jltomy", {"z": {"laugh_emotes": 6}})
     assert any("rire" in x or "😂" in x for x in t[:3])
+
+
+def test_creator_question_wins_and_no_fake_drama_on_imports():
+    t = suggest(_w("Comment écrire un hook impossible à scroller ? C'est la méthode du triple hook."), "", {"z": {"audio": 2}})
+    assert t[0].startswith("Comment écrire un hook")
+    assert not any("craqué" in x or "dégénéré" in x for x in t)

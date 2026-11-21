@@ -34,7 +34,7 @@ DEFAULT_SETTINGS = {
                "auto_facecam": True, "pip_size": 0.42, "pip_corner": "tl",
                "facecam": {"x": 0.0, "y": 0.0, "w": 0.3, "h": 0.3},
                "gameplay": {"x": 0.2, "y": 0.0, "w": 0.6, "h": 1.0}},
-    "hook": {"enabled": True, "seconds": 3.5, "size": 72, "color": "#FFFFFF", "bg": "#000000"},
+    "hook": {"enabled": True, "seconds": 3.5, "size": 84, "color": "#FFFFFF", "bg": "#000000"},
     "compilation": {"transition": "fade", "transition_duration": 0.4, "max_each": 20, "clips": 6,
                     "hours": 12},
     "ai": {"enabled": False, "provider": "gemini", "model": "gemini-2.5-flash-lite", "max_calls_per_day": 30,
