@@ -33,7 +33,7 @@ PROVIDERS = {
     "groq": {"url": "https://api.groq.com/openai/v1", "key": "GROQ_API_KEY", "model": "llama-3.3-70b-versatile",
              "label": "Groq (palier gratuit)"},
     "gemini": {"url": "https://generativelanguage.googleapis.com/v1beta/openai", "key": "GEMINI_API_KEY",
-               "model": "gemini-2.5-flash-lite", "label": "Gemini (palier gratuit)"},
+               "model": "gemini-3.5-flash-lite", "label": "Gemini (palier gratuit)"},
     "vertex": {"url": "https://aiplatform.googleapis.com/v1", "key": "VERTEX_API_KEY", "model": "gemini-2.5-flash",
                "label": "Gemini via Vertex AI (crédits Google Cloud)"},
     "ollama": {"url": "http://localhost:11434/v1", "key": None, "model": "qwen2.5:7b", "label": "Ollama (local)"},
